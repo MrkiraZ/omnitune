@@ -1,48 +1,53 @@
 'use client'
 
-import { useState } from 'react'
-import {
-  Activity,
-  BarChart3,
-  Check,
-  ChevronRight,
-  CircleHelp,
-  Disc3,
-  Guitar,
-  Headphones,
-  Mic,
-  Pause,
-  Play,
-  Radio,
-  Settings2,
-  Sparkles,
-  Target,
-  Trophy,
-  Volume2,
-  Waves,
-  Zap,
-} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Guitar, Mic, MicOff, Pause, Play, RotateCcw, Settings2, Volume2, Zap, Trophy, Flame, Music2 } from 'lucide-react'
 
-const chords = ['Em', 'G', 'C', 'D', 'Am']
-const phases = [
-  { label: 'Captura', detail: 'Entrada de áudio', icon: Mic, active: true },
-  { label: 'Análise', detail: 'Detecção de acordes', icon: Waves, active: false },
-  { label: 'Jogo', detail: 'Timing e feedback', icon: Zap, active: false },
-  { label: 'Progresso', detail: 'Histórico e evolução', icon: Trophy, active: false },
+type MicState = 'idle' | 'listening' | 'quiet' | 'denied'
+const notes = [
+  { chord: 'Em', color: 'green', lane: 0 },
+  { chord: 'G', color: 'red', lane: 1 },
+  { chord: 'C', color: 'yellow', lane: 2 },
+  { chord: 'D', color: 'blue', lane: 3 },
+  { chord: 'Em', color: 'green', lane: 0 },
+  { chord: 'G', color: 'red', lane: 1 },
+  { chord: 'C', color: 'yellow', lane: 2 },
+  { chord: 'D', color: 'blue', lane: 3 },
 ]
+const colors = ['green', 'red', 'yellow', 'blue']
 
 export default function Page() {
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [micState, setMicState] = useState<'idle' | 'listening' | 'denied'>('idle')
-  const [chordIndex, setChordIndex] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [micState, setMicState] = useState<MicState>('idle')
+  const [detected, setDetected] = useState('—')
+  const [score, setScore] = useState(18420)
   const [combo, setCombo] = useState(12)
+  const [streak, setStreak] = useState(78)
+  const [noteIndex, setNoteIndex] = useState(0)
+  const [feedback, setFeedback] = useState('PRONTO?')
+  const streamRef = useRef<MediaStream | null>(null)
+  const audioRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const rafRef = useRef<number | null>(null)
 
-  const currentChord = chords[chordIndex]
-  const nextChord = chords[(chordIndex + 1) % chords.length]
+  const target = notes[noteIndex % notes.length]
 
-  async function toggleMicrophone() {
-    if (micState === 'listening') {
+  useEffect(() => () => stopAudio(), [])
+
+  function stopAudio() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    audioRef.current?.close()
+    streamRef.current = null
+    audioRef.current = null
+    analyserRef.current = null
+  }
+
+  async function toggleMic() {
+    if (micState === 'listening' || micState === 'quiet') {
+      stopAudio()
       setMicState('idle')
+      setDetected('—')
       return
     }
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -50,82 +55,97 @@ export default function Page() {
       return
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      stream.getTracks().forEach((track) => track.stop())
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (!AudioCtx) throw new Error('AudioContext indisponível')
+      const context = new AudioCtx()
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 2048
+      analyser.smoothingTimeConstant = 0.78
+      context.createMediaStreamSource(stream).connect(analyser)
+      streamRef.current = stream
+      audioRef.current = context
+      analyserRef.current = analyser
       setMicState('listening')
+      analyzeAudio()
     } catch {
       setMicState('denied')
     }
   }
 
-  function advanceChord() {
-    setChordIndex((index) => (index + 1) % chords.length)
+  function analyzeAudio() {
+    const analyser = analyserRef.current
+    if (!analyser) return
+    const data = new Uint8Array(analyser.fftSize)
+    analyser.getByteTimeDomainData(data)
+    const rms = Math.sqrt(data.reduce((sum, value) => sum + (value - 128) ** 2, 0) / data.length)
+    if (rms < 2.6) {
+      setMicState('quiet')
+      setDetected('aguardando')
+    } else {
+      setMicState('listening')
+      const guesses = ['Em', 'G', 'C', 'D']
+      const guess = guesses[Math.floor((rms * 10) % guesses.length)]
+      setDetected(guess)
+      if (playing && guess === target.chord) hitNote()
+    }
+    rafRef.current = requestAnimationFrame(analyzeAudio)
+  }
+
+  function hitNote() {
+    setScore((value) => value + 250 + combo * 10)
     setCombo((value) => value + 1)
+    setStreak((value) => Math.min(100, value + 2))
+    setFeedback('ACERTOU!')
+    setNoteIndex((value) => value + 1)
+    window.setTimeout(() => setFeedback(''), 650)
+  }
+
+  function toggleGame() {
+    setPlaying((value) => !value)
+    setFeedback(playing ? 'PAUSADO' : 'VAI!')
   }
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex min-h-screen max-w-[1520px]">
-        <aside className="hidden w-64 shrink-0 flex-col border-r border-border/70 px-6 py-7 lg:flex">
-          <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground shadow-[0_0_28px_var(--glow)]"><Guitar className="size-5" /></div>
-            <div><p className="font-semibold tracking-tight">OmniTune</p><p className="text-xs text-muted-foreground">treine diferente</p></div>
+      <header className="flex h-16 items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur sm:px-8">
+        <div className="flex items-center gap-3"><div className="grid size-9 place-items-center rounded-lg bg-primary text-primary-foreground"><Guitar className="size-5" /></div><div><span className="font-bold tracking-tight">OmniTune</span><span className="ml-2 hidden text-xs text-muted-foreground sm:inline">ARCADE MODE</span></div></div>
+        <div className="flex items-center gap-3"><div className="hidden items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary sm:flex"><span className="size-2 animate-pulse rounded-full bg-primary" /> AO VIVO</div><button className="grid size-9 place-items-center rounded-lg border border-border text-muted-foreground hover:text-foreground" aria-label="Configurações"><Settings2 className="size-4" /></button><div className="grid size-9 place-items-center rounded-full bg-secondary text-xs font-bold">LS</div></div>
+      </header>
+
+      <div className="mx-auto max-w-[1380px] px-4 py-5 sm:px-8 lg:py-8">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-primary">Sessão 01 · Fundamentos</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">Primeiros acordes</h1></div><div className="flex items-center gap-2 text-xs text-muted-foreground"><Music2 className="size-4 text-primary" /> Neon Highway · 92 BPM</div></div>
+
+        <section className="game-shell overflow-hidden rounded-3xl border border-border bg-card shadow-2xl">
+          <div className="flex items-center justify-between border-b border-border/80 bg-secondary/40 px-4 py-3 sm:px-7"><div className="flex items-center gap-5"><div><p className="text-[10px] uppercase tracking-widest text-muted-foreground">SCORE</p><p className="font-mono text-xl font-bold tabular-nums text-primary">{score.toLocaleString('pt-BR')}</p></div><div className="hidden h-8 w-px bg-border sm:block" /><div className="hidden sm:block"><p className="text-[10px] uppercase tracking-widest text-muted-foreground">MULTIPLICADOR</p><p className="font-mono text-xl font-bold text-foreground">x{Math.min(4, Math.floor(combo / 10) + 1)}</p></div></div><div className="text-right"><p className="text-[10px] uppercase tracking-widest text-muted-foreground">COMBO</p><p className="flex items-center gap-1 font-mono text-xl font-bold text-orange-400"><Flame className="size-4" />{combo}</p></div></div>
+
+          <div className="game-stage relative min-h-[480px] overflow-hidden bg-[#090d17] px-3 py-5 sm:min-h-[535px] sm:px-12">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(35,57,95,.26),transparent_65%)]" />
+            <div className="absolute left-1/2 top-5 -translate-x-1/2 text-center"><p className={`text-sm font-black tracking-[0.28em] transition-all ${feedback === 'ACERTOU!' ? 'scale-125 text-primary' : 'text-white/70'}`}>{feedback || 'MANTENHA O RITMO'}</p><p className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">{micState === 'listening' ? `microfone ativo · detectado ${detected}` : 'ative o microfone para jogar'}</p></div>
+            <div className="lane-board absolute inset-x-1/2 bottom-0 top-20 w-[min(720px,94vw)] -translate-x-1/2">
+              <div className="lane-lines absolute inset-0 grid grid-cols-4">{colors.map((color) => <div key={color} className={`lane lane-${color}`} />)}</div>
+              <div className="note-field absolute inset-x-0 top-3 bottom-24">{notes.map((note, index) => <div key={`${note.chord}-${index}`} className={`falling-note note-${index} note-${note.color}`}><span>{note.chord}</span></div>)}</div>
+              <div className="hit-line absolute inset-x-0 bottom-20 h-1 bg-white shadow-[0_0_18px_white]" />
+              <div className="targets absolute inset-x-0 bottom-7 grid grid-cols-4 gap-2 px-1 sm:gap-4">{colors.map((color, index) => <button key={color} aria-label={`Alvo ${color}`} onClick={() => index === target.lane && hitNote()} className={`target target-${color} ${target.lane === index ? 'target-active' : ''}`}><span>{['A', 'S', 'D', 'F'][index]}</span></button>)}</div>
+            </div>
+            <div className="absolute bottom-5 left-5 hidden items-center gap-3 text-[10px] uppercase tracking-widest text-muted-foreground sm:flex"><span className="rounded border border-border px-2 py-1">A S D F</span> toque no alvo quando o acorde chegar</div>
+            <div className="absolute bottom-5 right-5 hidden text-right sm:block"><p className="text-[10px] uppercase tracking-widest text-muted-foreground">PRÓXIMO</p><p className="font-mono font-bold text-white">{notes[(noteIndex + 1) % notes.length].chord}</p></div>
           </div>
-          <nav className="mt-14 flex flex-col gap-2" aria-label="Navegação principal">
-            <a className="flex items-center gap-3 rounded-xl bg-primary/10 px-3 py-3 text-sm font-medium text-primary" href="#treinar"><Disc3 className="size-4" />Treinar</a>
-            <a className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-muted-foreground transition hover:bg-secondary hover:text-foreground" href="#explorar"><Headphones className="size-4" />Explorar</a>
-            <a className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-muted-foreground transition hover:bg-secondary hover:text-foreground" href="#progresso"><BarChart3 className="size-4" />Progresso</a>
-          </nav>
-          <div className="mt-auto rounded-2xl border border-border bg-card p-4">
-            <div className="mb-4 flex items-center justify-between"><span className="text-xs font-medium text-muted-foreground">SEU NÍVEL</span><Sparkles className="size-4 text-primary" /></div>
-            <p className="text-2xl font-semibold">Nível 04</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-secondary"><div className="h-full w-[68%] rounded-full bg-primary" /></div><p className="mt-2 text-xs text-muted-foreground">340 / 500 XP</p>
-          </div>
-        </aside>
 
-        <section className="min-w-0 flex-1 px-4 pb-24 pt-5 sm:px-8 lg:px-12 lg:pb-10 lg:pt-8">
-          <header className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 lg:hidden"><div className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground"><Guitar className="size-4" /></div><span className="font-semibold">OmniTune</span></div>
-            <div className="hidden lg:block"><p className="text-sm text-muted-foreground">Quarta-feira, 10 de setembro</p><h1 className="mt-1 text-2xl font-semibold tracking-tight">Hora de tocar, Lucas.</h1></div>
-            <div className="ml-auto flex items-center gap-2"><div className="hidden items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs text-muted-foreground sm:flex"><span className="size-2 rounded-full bg-primary shadow-[0_0_10px_var(--glow)]" />Sistema pronto</div><button className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition hover:text-foreground" aria-label="Configurações"><Settings2 className="size-4" /></button><div className="grid size-9 place-items-center rounded-xl bg-secondary text-xs font-semibold">LS</div></div>
-          </header>
-
-          <div id="treinar" className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_330px]">
-            <div className="min-w-0">
-              <div className="relative overflow-hidden rounded-3xl border border-border bg-card p-6 sm:p-8">
-                <div className="pointer-events-none absolute -right-20 -top-24 size-72 rounded-full border border-primary/10" /><div className="pointer-events-none absolute -right-4 -top-8 size-44 rounded-full border border-primary/10" />
-                <div className="relative flex flex-wrap items-start justify-between gap-5"><div><div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-primary"><Target className="size-4" />Sessão guiada · 01</div><h2 className="max-w-xl text-3xl font-semibold tracking-tight text-balance sm:text-4xl">Primeiros acordes</h2><p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">Construa sua base com quatro acordes essenciais. Sem pressão, só progresso.</p></div><div className="rounded-2xl border border-border bg-background/50 px-4 py-3"><p className="text-xs text-muted-foreground">PROGRESSO</p><p className="mt-1 text-xl font-semibold">3 <span className="text-sm font-normal text-muted-foreground">/ 8 min</span></p></div></div>
-                <div className="relative mt-8 flex items-center gap-3"><div className="h-2 flex-1 overflow-hidden rounded-full bg-secondary"><div className="h-full w-[38%] rounded-full bg-primary" /></div><span className="text-xs font-medium text-primary">38%</span></div>
-                <button onClick={() => setIsPlaying((value) => !value)} className="relative mt-7 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-[0_8px_26px_var(--glow)] transition hover:brightness-110">{isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}{isPlaying ? 'Pausar sessão' : 'Começar sessão'}<ChevronRight className="size-4" /></button>
-              </div>
-
-              <div className="mt-6 grid grid-cols-3 gap-3"><Metric icon={Zap} label="Sequência" value={`${combo}`} suffix="acordes" /><Metric icon={Target} label="Precisão" value="94" suffix="%" /><Metric icon={Trophy} label="XP ganho" value="+120" suffix="hoje" /></div>
-
-              <div className="mt-6 rounded-3xl border border-border bg-card p-5 sm:p-7"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2"><span className={`size-2 rounded-full ${micState === 'listening' ? 'animate-pulse bg-primary shadow-[0_0_12px_var(--glow)]' : 'bg-muted-foreground'}`} /><h3 className="font-semibold">Detector ao vivo</h3></div><p className="mt-1 text-sm text-muted-foreground">{micState === 'listening' ? 'Ouvindo seu instrumento...' : 'Ative o microfone para começar'}</p></div><button onClick={toggleMicrophone} className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium transition hover:border-primary/50 hover:text-primary"><Mic className="size-4" />{micState === 'listening' ? 'Desativar' : 'Ativar microfone'}</button></div>
-                  {micState === 'denied' && <p className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">Não foi possível acessar o microfone. Você ainda pode navegar pela sessão no modo demonstração.</p>}
-                  <div className="mt-7 flex flex-col items-center justify-center rounded-2xl border border-primary/20 bg-background px-4 py-8 text-center"><p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Acorde detectado</p><p className="mt-3 text-7xl font-semibold tracking-tighter text-primary">{currentChord}</p><div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"><span className="size-1.5 rounded-full bg-primary" />{micState === 'listening' ? '92% de confiança' : 'aguardando entrada'}<Volume2 className="ml-1 size-3.5" /></div><div className="mt-6 flex w-full max-w-md items-end justify-center gap-1.5" aria-label="Visualização da entrada de áudio">{[22,38,56,31,72,45,63,29,48,76,39,58,26,44,67,35,52,24].map((height, index) => <span key={index} className={`w-1.5 rounded-full transition-all ${micState === 'listening' ? 'bg-primary' : 'bg-muted'} `} style={{ height: `${height}px`, opacity: micState === 'listening' ? 0.35 + (index % 4) * 0.15 : 0.5 }} />)}</div></div>
-                  <div className="mt-6 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Próximo acorde</p><p className="mt-1 text-lg font-semibold">{nextChord}</p></div><button onClick={advanceChord} disabled={!isPlaying} className="rounded-xl bg-secondary px-4 py-2 text-xs font-semibold text-foreground transition hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">Confirmar acorde <Check className="ml-1 inline size-3.5" /></button></div>
-                </div>
-              </div>
-
-            <aside className="flex flex-col gap-6">
-              <div id="explorar" className="rounded-3xl border border-border bg-card p-5">
-                <div className="flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Trilha atual</p><h3 className="mt-1 font-semibold">Fundamentos</h3></div><button className="text-muted-foreground hover:text-foreground" aria-label="Ajuda"><CircleHelp className="size-4" /></button></div>
-                <div className="mt-6 flex items-center gap-2">{chords.map((chord, index) => <button key={chord} onClick={() => setChordIndex(index)} className={`grid size-11 place-items-center rounded-xl text-xs font-semibold transition ${index === chordIndex ? 'bg-primary text-primary-foreground shadow-[0_0_18px_var(--glow)]' : index < chordIndex ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'}`}>{chord}</button>)}</div>
-                <div className="mt-6 flex items-center justify-between border-t border-border pt-5"><span className="text-xs text-muted-foreground">Aula 1 de 12</span><span className="text-xs font-medium text-primary">8% completo</span></div>
-              </div>
-              <div id="progresso" className="rounded-3xl border border-border bg-card p-5">
-                <div className="flex items-center gap-2"><Radio className="size-4 text-primary" /><h3 className="font-semibold">Como funciona</h3></div>
-                <div className="mt-5 flex flex-col gap-4">{phases.map(({ label, detail, icon: Icon, active }, index) => <div key={label} className="flex items-center gap-3"><div className={`grid size-9 shrink-0 place-items-center rounded-xl ${active ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'}`}><Icon className="size-4" /></div><div className="min-w-0 flex-1"><p className="text-sm font-medium">{label}</p><p className="truncate text-xs text-muted-foreground">{detail}</p></div>{index === 0 && <span className="text-[10px] font-semibold uppercase tracking-wider text-primary">agora</span>}</div>)}</div>
-              </div>
-            </aside>
-          </div>
+          <div className="flex flex-col gap-4 border-t border-border/80 bg-secondary/30 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7"><div className="flex items-center gap-3"><button onClick={toggleGame} className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-black text-primary-foreground shadow-[0_0_24px_var(--glow)] transition hover:brightness-110">{playing ? <Pause className="size-4" /> : <Play className="size-4" />}{playing ? 'Pausar' : 'Começar jogo'}</button><button onClick={() => { setScore(0); setCombo(0); setNoteIndex(0); setFeedback('RESET') }} className="grid size-11 place-items-center rounded-xl border border-border text-muted-foreground hover:text-foreground" aria-label="Reiniciar"><RotateCcw className="size-4" /></button></div><button onClick={toggleMic} className={`inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-xs font-bold transition ${micState === 'listening' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/60 hover:text-primary'}`}>{micState === 'listening' ? <Mic className="size-4 animate-pulse" /> : micState === 'quiet' ? <Volume2 className="size-4" /> : micState === 'denied' ? <MicOff className="size-4" /> : <Mic className="size-4" />}{micState === 'listening' ? 'Ouvindo seu violão' : micState === 'quiet' ? 'Sem sinal — toque uma corda' : micState === 'denied' ? 'Microfone bloqueado' : 'Ativar microfone'}</button></div>
         </section>
+
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><Stat icon={Zap} label="Precisão" value={`${streak}%`} /><Stat icon={Flame} label="Melhor combo" value="24x" /><Stat icon={Trophy} label="XP da sessão" value="+120" /><Stat icon={Volume2} label="Entrada" value={micState === 'listening' ? 'OK' : '—'} /></div>
+        {micState === 'denied' && <div className="mt-4 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">O navegador não permitiu o acesso. Verifique o ícone de cadeado na barra de endereço, permita o microfone e tente novamente.</div>}
+        <p className="mt-5 text-center text-xs text-muted-foreground">Dica: toque acordes limpos perto do microfone. O OmniTune mostra “sem sinal” quando ainda não há áudio suficiente.</p>
       </div>
-      <nav className="fixed inset-x-4 bottom-4 z-10 flex items-center justify-around rounded-2xl border border-border bg-card/95 p-2 shadow-2xl backdrop-blur lg:hidden" aria-label="Navegação móvel"><a className="flex flex-col items-center gap-1 rounded-xl bg-primary/10 px-5 py-2 text-primary" href="#treinar"><Disc3 className="size-4" /><span className="text-[10px] font-medium">Treinar</span></a><a className="flex flex-col items-center gap-1 px-5 py-2 text-muted-foreground" href="#explorar"><Headphones className="size-4" /><span className="text-[10px] font-medium">Explorar</span></a><a className="flex flex-col items-center gap-1 px-5 py-2 text-muted-foreground" href="#progresso"><BarChart3 className="size-4" /><span className="text-[10px] font-medium">Progresso</span></a></nav>
     </main>
   )
 }
 
-function Metric({ icon: Icon, label, value, suffix }: { icon: typeof Zap; label: string; value: string; suffix: string }) {
-  return <div className="rounded-2xl border border-border bg-card p-4"><Icon className="size-4 text-primary" /><p className="mt-5 text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl font-semibold">{value} <span className="text-xs font-normal text-muted-foreground">{suffix}</span></p></div>
+function Stat({ icon: Icon, label, value }: { icon: typeof Zap; label: string; value: string }) {
+  return <div className="rounded-2xl border border-border bg-card px-4 py-3"><div className="flex items-center gap-2 text-xs text-muted-foreground"><Icon className="size-3.5 text-primary" />{label}</div><p className="mt-2 font-mono text-lg font-bold">{value}</p></div>
 }
+
+void Pause
+void Guitar
