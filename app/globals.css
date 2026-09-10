@@ -66,7 +66,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .lane-blue { box-shadow: inset 0 0 32px oklch(0.65 0.2 250 / 0.035); }
 .falling-note { position: absolute; left: calc(var(--lane) * 25% + 3%); width: 19%; height: 38px; display: grid; place-items: center; border-radius: 999px; color: oklch(0.1 0 0); font: 800 11px var(--font-geist-mono), monospace; box-shadow: 0 0 20px currentColor, inset 0 2px 0 oklch(1 0 0 / .5); animation: none; top: var(--note-top, 18%); animation-delay: 0s; }
 .falling-note span { opacity: 1; color: oklch(0.12 0.02 255); text-shadow: none; font-weight: 900; }
-.falling-note.note-lit { z-index: 5; filter: brightness(1.65) saturate(1.45); transform: scale(1.12); box-shadow: 0 0 18px currentColor, 0 0 42px oklch(0.9 0.2 190 / .85), inset 0 2px 0 oklch(1 0 0 / .8); outline: 3px solid oklch(0.9 0.2 190 / .85); }
+.falling-note.note-guide { z-index: 4; filter: brightness(1.35) saturate(1.2); outline: 2px dashed oklch(0.86 0.14 195 / .9); box-shadow: 0 0 18px oklch(0.78 0.16 195 / .72), inset 0 2px 0 oklch(1 0 0 / .6); }.falling-note.note-guide::after { content: 'PRÓXIMA'; position: absolute; top: -18px; font: 800 8px var(--font-geist-mono), monospace; color: oklch(0.86 0.14 195); letter-spacing: .08em; }.falling-note.note-lit { z-index: 5; filter: brightness(1.65) saturate(1.45); transform: scale(1.12); box-shadow: 0 0 18px currentColor, 0 0 42px oklch(0.9 0.2 190 / .85), inset 0 2px 0 oklch(1 0 0 / .8); outline: 3px solid oklch(0.9 0.2 190 / .85); }
 .note-green { --lane: 0; background: #9cff57; color: #9cff57; }
 .note-red { --lane: 1; background: #ff6a62; color: #ff6a62; }
 .note-yellow { --lane: 2; background: #ffe45c; color: #ffe45c; }
