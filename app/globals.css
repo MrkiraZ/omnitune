@@ -95,5 +95,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .fret-cell { z-index: 1; display: grid; min-height: 30px; place-items: center; border-left: 1px solid oklch(1 0 0 / .14); color: transparent; }
 .fret-cell i { display: grid; size: 22px; place-items: center; border-radius: 999px; font: 800 10px var(--font-geist-mono), monospace; font-style: normal; }
 .fret-lit i { background: oklch(.84 .19 133); color: oklch(.12 .02 255); box-shadow: 0 0 16px oklch(.84 .19 133); }
+.fret-target i { border: 2px solid oklch(.9 .16 330); color: oklch(.94 .12 330); box-shadow: 0 0 12px oklch(.8 .18 330 / .7); }
+.fret-guide i { border: 2px solid oklch(.78 .16 195); color: oklch(.86 .12 195); background: oklch(.78 .16 195 / .18); box-shadow: 0 0 14px oklch(.78 .16 195 / .7); }
 @keyframes noteDrop { from { transform: translateY(-180px) scale(.65); opacity: .15; } 55% { opacity: 1; } to { transform: translateY(420px) scale(1); opacity: .95; } }
 @media (prefers-reduced-motion: reduce) { .falling-note { animation: none; } }
