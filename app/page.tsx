@@ -1,113 +1,179 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { AudioLines, CircleHelp, FileAudio, Mic, Pause, Play, Radio, RotateCcw, Sparkles, Square, Volume2, Waves } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ArrowLeft, BookOpen, ChevronDown, CircleHelp, Gauge, Headphones, Mic, Pause, Play, RotateCcw, Settings, SlidersHorizontal, Square, Volume2, Waves } from "lucide-react"
 
-type Source = "microphone" | "file"
-type Chord = { name: string; root: string; quality: string; confidence: number; tip: string; color: string }
+type AudioMode = "microphone" | "file"
+type EventItem = { chord: string; color: string; lane: number; top: number; delay: string }
 
-const chordMap: Record<string, Chord> = {
-  C: { name: "C", root: "Dó", quality: "maior", confidence: 86, tip: "Use a escala de Dó maior para improvisar.", color: "#8cff66" },
-  "C#": { name: "C#", root: "Dó sustenido", quality: "maior", confidence: 78, tip: "Experimente a escala cromática com frases curtas.", color: "#68b6ff" },
-  D: { name: "D", root: "Ré", quality: "maior", confidence: 91, tip: "Notas Ré, Fá sustenido e Lá soam estáveis aqui.", color: "#ffd95b" },
-  "D#": { name: "D#", root: "Ré sustenido", quality: "maior", confidence: 74, tip: "Segure as notas de passagem e resolva em Sol.", color: "#ff7772" },
-  E: { name: "Em", root: "Mi", quality: "menor", confidence: 94, tip: "A pentatônica de Mi menor é uma ótima escolha.", color: "#8cff66" },
-  F: { name: "F", root: "Fá", quality: "maior", confidence: 88, tip: "Tente uma frase com Fá, Lá e Dó.", color: "#ff7772" },
-  "F#": { name: "F#", root: "Fá sustenido", quality: "maior", confidence: 80, tip: "Use a terça para destacar a mudança.", color: "#68b6ff" },
-  G: { name: "G", root: "Sol", quality: "maior", confidence: 93, tip: "Sol maior combina com a escala de Sol.", color: "#ffd95b" },
-  "G#": { name: "G#", root: "Sol sustenido", quality: "maior", confidence: 76, tip: "Teste a resolução em Lá menor.", color: "#ff7772" },
-  A: { name: "Am", root: "Lá", quality: "menor", confidence: 90, tip: "A pentatônica de Lá menor funciona muito bem.", color: "#8cff66" },
-  "A#": { name: "A#", root: "Lá sustenido", quality: "maior", confidence: 75, tip: "Use notas longas e escute a resolução.", color: "#68b6ff" },
-  B: { name: "B", root: "Si", quality: "maior", confidence: 83, tip: "Experimente Si, Ré sustenido e Fá sustenido.", color: "#ffd95b" },
-}
+const events: EventItem[] = [
+  { chord: "E", color: "red", lane: 0, top: 54, delay: "-.4s" },
+  { chord: "A", color: "yellow", lane: 1, top: 47, delay: "-1.4s" },
+  { chord: "D", color: "blue", lane: 2, top: 40, delay: "-2.25s" },
+  { chord: "G", color: "green", lane: 3, top: 33, delay: "-3.2s" },
+  { chord: "Em", color: "purple", lane: 4, top: 25, delay: "-4.1s" },
+]
 
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-function detectPitch(buffer: Float32Array, sampleRate: number) {
+function autoCorrelate(buffer: Float32Array, sampleRate: number) {
   let rms = 0
   for (const value of buffer) rms += value * value
   rms = Math.sqrt(rms / buffer.length)
-  if (rms < 0.008) return { rms, note: null as string | null }
+  if (rms < 0.006) return { rms, frequency: null as number | null }
   let bestOffset = -1
   let bestCorrelation = 0
-  for (let offset = 24; offset < 900; offset += 2) {
+  const minOffset = Math.floor(sampleRate / 1000)
+  const maxOffset = Math.min(Math.floor(sampleRate / 55), buffer.length - 1)
+  for (let offset = minOffset; offset < maxOffset; offset += 2) {
     let correlation = 0
-    for (let i = 0; i < buffer.length - offset; i += 4) correlation += Math.abs(buffer[i] - buffer[i + offset])
-    correlation = 1 - correlation / Math.max(1, buffer.length / 4)
+    for (let i = 0; i < buffer.length - offset; i += 3) correlation += 1 - Math.abs(buffer[i] - buffer[i + offset])
+    correlation /= buffer.length / 3
     if (correlation > bestCorrelation) { bestCorrelation = correlation; bestOffset = offset }
   }
-  if (bestOffset < 0 || bestCorrelation < 0.12) return { rms, note: null as string | null }
-  const frequency = sampleRate / bestOffset
+  return { rms, frequency: bestOffset > 0 && bestCorrelation > 0.42 ? sampleRate / bestOffset : null }
+}
+
+function frequencyToNote(frequency: number | null) {
+  if (!frequency || frequency < 45 || frequency > 1400) return null
   const midi = Math.round(69 + 12 * Math.log2(frequency / 440))
-  return { rms, note: noteNames[(midi % 12 + 12) % 12] }
+  return { name: noteNames[(midi % 12 + 12) % 12], frequency: Math.round(frequency) }
 }
 
 export default function Home() {
-  const [source, setSource] = useState<Source>("microphone")
-  const [isListening, setIsListening] = useState(false)
-  const [status, setStatus] = useState("Pronto para escutar")
+  const [mode, setMode] = useState<AudioMode>("microphone")
+  const [listening, setListening] = useState(false)
+  const [playing, setPlaying] = useState(false)
+  const [status, setStatus] = useState("Pronto para ouvir")
   const [signal, setSignal] = useState(0)
-  const [note, setNote] = useState("—")
-  const [currentChord, setCurrentChord] = useState<Chord>(chordMap.E)
-  const [history, setHistory] = useState<string[]>(["Em", "C", "G", "D"])
-  const [fileName, setFileName] = useState("")
+  const [detectedNote, setDetectedNote] = useState("—")
+  const [detectedFrequency, setDetectedFrequency] = useState("—")
+  const [detectedChord, setDetectedChord] = useState("Em")
+  const [confidence, setConfidence] = useState(0)
   const [fileUrl, setFileUrl] = useState("")
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [improv, setImprov] = useState(true)
-  const audioContextRef = useRef<AudioContext | null>(null)
+  const [fileName, setFileName] = useState("")
+  const [volume, setVolume] = useState(62)
+  const [isMuted, setIsMuted] = useState(false)
+  const [progress, setProgress] = useState(12)
+  const [diagnostic, setDiagnostic] = useState("Microfone não iniciado")
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const contextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const animationRef = useRef<number | null>(null)
-  const stableNoteRef = useRef({ value: "", count: 0 })
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const sourceRef = useRef<MediaStreamAudioSourceNode | MediaElementAudioSourceNode | null>(null)
+  const lastNoteRef = useRef({ value: "", count: 0 })
 
-  const stopAudio = useCallback(() => {
-    if (animationRef.current) cancelAnimationFrame(animationRef.current)
+  const stop = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
     streamRef.current?.getTracks().forEach((track) => track.stop())
-    audioContextRef.current?.close()
-    streamRef.current = null; audioContextRef.current = null; analyserRef.current = null
-    setIsListening(false); setIsPlaying(false); setStatus("Pronto para escutar"); setSignal(0)
+    contextRef.current?.close()
+    streamRef.current = null
+    sourceRef.current = null
+    contextRef.current = null
+    analyserRef.current = null
+    setListening(false)
+    setPlaying(false)
+    setSignal(0)
+    setStatus("Pronto para ouvir")
   }, [])
 
   const analyze = useCallback(() => {
-    const analyser = analyserRef.current; const context = audioContextRef.current
+    const analyser = analyserRef.current
+    const context = contextRef.current
     if (!analyser || !context) return
-    const buffer = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buffer)
-    const result = detectPitch(buffer, context.sampleRate); const level = Math.min(100, Math.round(result.rms * 1500))
+    const data = new Float32Array(analyser.fftSize)
+    analyser.getFloatTimeDomainData(data)
+    const result = autoCorrelate(data, context.sampleRate)
+    const level = Math.min(100, Math.round(result.rms * 2100))
     setSignal(level)
-    if (result.note) {
-      setNote(result.note)
-      if (stableNoteRef.current.value === result.note) stableNoteRef.current.count += 1
-      else stableNoteRef.current = { value: result.note, count: 1 }
-      if (stableNoteRef.current.count >= 3) { const chord = chordMap[result.note] ?? chordMap.Em; setCurrentChord(chord); setHistory((items) => items[0] === chord.name ? items : [chord.name, ...items].slice(0, 8)); setStatus("Acorde identificado") }
-    } else if (level < 3) setStatus("Aguardando um sinal...")
-    animationRef.current = requestAnimationFrame(analyze)
+    const note = frequencyToNote(result.frequency)
+    if (note) {
+      setDetectedNote(note.name)
+      setDetectedFrequency(`${note.frequency} Hz`)
+      setStatus("Sinal detectado")
+      lastNoteRef.current = lastNoteRef.current.value === note.name ? { value: note.name, count: lastNoteRef.current.count + 1 } : { value: note.name, count: 1 }
+      if (lastNoteRef.current.count >= 4) {
+        const chord = note.name === "E" ? "Em" : note.name === "A" ? "A" : note.name === "D" ? "D" : note.name === "G" ? "G" : note.name === "C" ? "C" : note.name === "F" ? "F" : "—"
+        if (chord !== "—") { setDetectedChord(chord); setConfidence(Math.min(98, 66 + level / 3)) }
+      }
+    } else if (level < 3) {
+      setStatus("Sem sinal — toque ou cante perto do microfone")
+      setDetectedNote("—")
+      setDetectedFrequency("—")
+    } else setStatus("Sinal detectado — procurando uma nota estável")
+    rafRef.current = requestAnimationFrame(analyze)
   }, [])
 
   const startMicrophone = async () => {
     try {
-      stopAudio()
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
-      const context = new AudioContext(); const analyser = context.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.78
-      const input = context.createMediaStreamSource(stream); input.connect(analyser)
-      streamRef.current = stream; audioContextRef.current = context; analyserRef.current = analyser; setSource("microphone"); setIsListening(true); setStatus("Escutando seu instrumento"); analyze()
-    } catch { setStatus("Microfone bloqueado: permita o acesso no navegador"); setIsListening(false) }
+      stop()
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador não oferece acesso ao microfone")
+      setStatus("Solicitando permissão do microfone...")
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      const context = new AudioContext()
+      await context.resume()
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 4096
+      analyser.smoothingTimeConstant = 0.25
+      const source = context.createMediaStreamSource(stream)
+      source.connect(analyser)
+      streamRef.current = stream
+      sourceRef.current = source
+      contextRef.current = context
+      analyserRef.current = analyser
+      setMode("microphone")
+      setListening(true)
+      setDiagnostic(`Microfone ativo: ${stream.getAudioTracks()[0]?.label || "entrada padrão"}`)
+      setStatus("Ouvindo — toque uma nota ou acorde")
+      analyze()
+    } catch (error) {
+      setListening(false)
+      setDiagnostic(error instanceof Error ? error.message : "Não foi possível acessar o microfone")
+      setStatus("Microfone indisponível — confira a permissão do navegador")
+    }
   }
 
   const startFile = async () => {
     if (!fileUrl || !audioRef.current) return
-    stopAudio(); const context = new AudioContext(); const analyser = context.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.82
-    const input = context.createMediaElementSource(audioRef.current); input.connect(analyser); analyser.connect(context.destination)
-    audioContextRef.current = context; analyserRef.current = analyser; setSource("file"); setIsListening(true); setIsPlaying(true); setStatus("Analisando a música"); await context.resume(); await audioRef.current.play(); analyze()
+    try {
+      stop()
+      const context = new AudioContext()
+      await context.resume()
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 4096
+      analyser.smoothingTimeConstant = 0.35
+      const source = context.createMediaElementSource(audioRef.current)
+      source.connect(analyser)
+      analyser.connect(context.destination)
+      contextRef.current = context
+      analyserRef.current = analyser
+      sourceRef.current = source
+      setMode("file")
+      setListening(true)
+      setPlaying(true)
+      setStatus("Analisando áudio")
+      setDiagnostic(`Arquivo carregado: ${fileName}`)
+      await audioRef.current.play()
+      analyze()
+    } catch { setStatus("Não foi possível analisar este arquivo") }
   }
 
-  useEffect(() => () => stopAudio(), [stopAudio])
-  const onFile = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; if (fileUrl) URL.revokeObjectURL(fileUrl); setFileName(file.name); setFileUrl(URL.createObjectURL(file)); setStatus("Arquivo pronto para analisar") }
+  const togglePlayback = async () => {
+    if (!audioRef.current) return
+    if (audioRef.current.paused) { await audioRef.current.play(); setPlaying(true) } else { audioRef.current.pause(); setPlaying(false) }
+  }
 
-  return <main className="min-h-screen bg-background text-foreground">
-    <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 lg:px-10"><div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground"><Waves className="size-5" /></div><div><p className="font-mono text-xs font-bold uppercase tracking-[0.28em] text-primary">OmniTune</p><p className="text-xs text-muted-foreground">Seu estúdio de escuta</p></div></div><div className="hidden items-center gap-5 text-xs text-muted-foreground md:flex"><span className="flex items-center gap-2"><Radio className="size-3 text-primary" /> áudio em tempo real</span><button aria-label="Ajuda" className="rounded-full p-2 hover:bg-secondary"><CircleHelp className="size-4" /></button></div></header>
-    <div className="mx-auto max-w-7xl px-5 pb-10 lg:px-10"><section className="mb-8 flex flex-col gap-2"><p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">Reconhecimento de acordes</p><h1 className="max-w-3xl text-balance text-3xl font-semibold tracking-tight sm:text-5xl">Toque. Escute. Entenda a música.</h1><p className="max-w-2xl text-sm leading-6 text-muted-foreground">Conecte um microfone ou carregue uma música. O OmniTune escuta o áudio e transforma o que está acontecendo em acordes para você acompanhar e improvisar.</p></section>
-      <section className="grid gap-5 lg:grid-cols-[1fr_360px]"><div className="flex flex-col gap-5"><div className="rounded-3xl border border-border bg-card p-5 sm:p-8"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2"><span className={`size-2.5 rounded-full ${isListening ? "animate-pulse bg-primary" : "bg-muted-foreground"}`} /><span className="text-sm font-medium">{status}</span></div><p className="mt-2 text-xs text-muted-foreground">{source === "microphone" ? "Entrada: microfone" : `Entrada: ${fileName || "arquivo de áudio"}`}</p></div><div className="flex items-center gap-2 rounded-xl bg-secondary px-3 py-2 text-xs text-muted-foreground"><Volume2 className="size-4" /> Sinal {signal}%</div></div><div className="mt-10 grid place-items-center rounded-3xl border border-border bg-background/70 py-12 text-center"><p className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground">Acorde detectado</p><p className="mt-3 text-8xl font-bold tracking-tighter sm:text-[10rem]" style={{ color: currentChord.color }}>{currentChord.name}</p><p className="mt-2 text-sm text-muted-foreground">{currentChord.root} · {currentChord.quality} · confiança {currentChord.confidence}%</p><div className="mt-7 h-1.5 w-52 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${currentChord.confidence}%` }} /></div><p className="mt-5 max-w-md text-sm text-muted-foreground">{improv ? currentChord.tip : "Ative o modo improvisação para receber sugestões enquanto toca."}</p></div><div className="mt-6 flex flex-wrap items-center justify-center gap-3"><button onClick={isListening && source === "microphone" ? stopAudio : startMicrophone} className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground transition hover:opacity-90">{isListening && source === "microphone" ? <Square className="size-4" /> : <Mic className="size-4" />}{isListening && source === "microphone" ? "Parar escuta" : "Escutar violão"}</button><label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-secondary px-5 py-3 text-sm font-semibold transition hover:border-primary/50"><FileAudio className="size-4" />{fileName ? "Trocar música" : "Carregar música"}<input type="file" accept="audio/*" onChange={onFile} className="sr-only" /></label>{fileUrl && <button onClick={startFile} className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-3 text-sm font-semibold hover:bg-secondary">{isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}{isPlaying ? "Pausar análise" : "Analisar música"}</button>}</div><audio ref={audioRef} src={fileUrl} onEnded={stopAudio} className="hidden" /></div><div className="rounded-3xl border border-border bg-card p-5 sm:p-6"><div className="mb-5 flex items-center justify-between"><div><h2 className="font-semibold">Linha do tempo</h2><p className="mt-1 text-xs text-muted-foreground">Os acordes que o OmniTune já ouviu</p></div><button onClick={() => setHistory([])} aria-label="Limpar histórico" className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"><RotateCcw className="size-4" /></button></div><div className="flex min-h-20 items-end gap-2 overflow-hidden">{(history.length ? history : ["—"]).map((item, index) => <div key={`${item}-${index}`} className={`flex min-w-16 flex-1 flex-col items-center gap-2 rounded-xl border px-3 py-3 ${index === 0 ? "border-primary/60 bg-primary/10 text-primary" : "border-border bg-secondary/50 text-muted-foreground"}`}><span className="font-mono text-lg font-bold">{item}</span><span className="text-[10px]">{index === 0 ? "agora" : `${index * 2}s atrás`}</span></div>)}</div></div></div>
-        <aside className="flex flex-col gap-5"><div className="rounded-3xl border border-border bg-card p-6"><div className="flex items-center justify-between"><div><p className="font-mono text-xs uppercase tracking-[0.18em] text-primary">Modo prática</p><h2 className="mt-2 text-xl font-semibold">Improvisação</h2></div><button aria-pressed={improv} onClick={() => setImprov(!improv)} className={`relative h-7 w-12 rounded-full transition ${improv ? "bg-primary" : "bg-secondary"}`}><span className={`absolute top-1 size-5 rounded-full bg-white transition ${improv ? "left-6" : "left-1"}`} /></button></div><p className="mt-4 text-sm leading-6 text-muted-foreground">Receba sugestões de escalas e notas enquanto acompanha a música.</p><div className="mt-6 rounded-2xl bg-background p-4"><div className="flex items-center justify-between text-xs text-muted-foreground"><span>Nota que você está ouvindo</span><span className="font-mono text-primary">{note}</span></div><div className="mt-4 flex h-10 items-end gap-1">{Array.from({ length: 24 }).map((_, i) => <span key={i} className="flex-1 rounded-t-sm bg-primary/40" style={{ height: `${20 + ((i * 17) % 65)}%` }} />)}</div></div></div><div className="rounded-3xl border border-border bg-card p-6"><div className="flex items-center gap-2"><Sparkles className="size-4 text-primary" /><h2 className="font-semibold">Como usar</h2></div><ol className="mt-5 flex flex-col gap-4 text-sm text-muted-foreground"><li className="flex gap-3"><span className="font-mono text-primary">01</span><span>Conecte o microfone ou carregue uma música.</span></li><li className="flex gap-3"><span className="font-mono text-primary">02</span><span>Toque junto e aguarde o acorde estabilizar.</span></li><li className="flex gap-3"><span className="font-mono text-primary">03</span><span>Use o acorde e a dica para improvisar.</span></li></ol></div><div className="rounded-2xl border border-dashed border-border p-4"><div className="flex items-center gap-2 text-xs font-semibold"><AudioLines className="size-4 text-primary" /> Sobre a detecção</div><p className="mt-2 text-xs leading-5 text-muted-foreground">A análise funciona melhor com violão isolado. Músicas completas são uma estimativa, pois bateria, voz e baixo podem interferir no acorde.</p></div></aside></section></div>
+  useEffect(() => () => stop(), [stop])
+  const onFile = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; if (fileUrl) URL.revokeObjectURL(fileUrl); setFileName(file.name); setFileUrl(URL.createObjectURL(file)); setMode("file"); setStatus("Arquivo pronto — pressione analisar") }
+  const waveform = useMemo(() => Array.from({ length: 86 }, (_, index) => 10 + ((index * 31) % 62)), [])
+
+  return <main className="min-h-screen bg-[#090912] text-foreground">
+    <header className="flex h-16 items-center gap-4 border-b border-[#252443] bg-[#12111e] px-3 sm:px-6"><button className="grid size-10 place-items-center rounded-xl bg-[#242337] text-foreground hover:bg-[#302e4b]" aria-label="Voltar"><ArrowLeft className="size-5" /></button><div className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-fuchsia-500 to-cyan-400 text-white"><Waves className="size-5" /></div><div className="min-w-0"><div className="flex items-center gap-2"><strong className="truncate text-lg">OmniTune</strong><span className="rounded-full border border-primary/70 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-primary">ao vivo</span></div><p className="hidden text-[11px] text-muted-foreground sm:block">MODO APRENDER · Reconhecimento de áudio · Iniciante</p></div><div className="ml-auto hidden items-center gap-8 text-center sm:flex"><div><p className="text-[10px] font-bold uppercase text-muted-foreground">BPM</p><strong className="text-2xl">60</strong></div><div><p className="text-[10px] font-bold uppercase text-muted-foreground">ACORDES</p><strong className="text-2xl text-cyan-300">{Math.max(1, Math.round(progress / 2))}</strong></div></div><div className="ml-auto flex items-center gap-2 sm:ml-6"><button className="grid size-9 place-items-center rounded-full border border-cyan-400/70 text-cyan-300"><Settings className="size-4" /></button><button className="grid size-9 place-items-center rounded-full border border-fuchsia-400/70 text-fuchsia-300"><BookOpen className="size-4" /></button></div></header>
+    <section className="border-b border-[#252443] bg-[#0e0d18] px-3 py-3 sm:px-6"><div className="flex items-center justify-between"><div className="flex items-center gap-3"><span className="font-mono text-xs text-muted-foreground">EXERCÍCIO</span><strong className="text-sm">Ouça e acompanhe</strong><span className="rounded-full bg-primary/15 px-2 py-1 text-[10px] font-bold text-primary">MICROFONE</span></div><span className="hidden text-xs text-muted-foreground sm:block">A pista acompanha o áudio detectado</span></div></section>
+    <section className="relative mx-2 mt-2 h-[390px] overflow-hidden rounded-2xl border border-[#302552] bg-[#0b0b15] sm:mx-4 sm:h-[510px]"><div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-indigo-950/60 via-purple-950/20 to-transparent" /><div className="absolute inset-x-0 top-24 h-px bg-gradient-to-r from-fuchsia-500/70 via-cyan-400/40 to-transparent shadow-[0_0_20px_#9c5cff]" /><div className="absolute inset-x-[4%] bottom-0 top-20 grid grid-cols-6 [transform:perspective(900px)_rotateX(12deg)] [transform-origin:bottom]">{Array.from({ length: 6 }).map((_, index) => <div key={index} className={`border-x border-white/[0.055] ${index % 2 ? "bg-white/[0.015]" : "bg-transparent"}`} />)}</div><div className="absolute inset-x-[4%] bottom-0 top-20">{Array.from({ length: 7 }).map((_, index) => <div key={index} className="absolute bottom-0 top-0 border-l border-white/[0.06]" style={{ left: `${index * 16.66}%`, transform: "perspective(500px) rotateX(12deg)" }} />)}{events.map((event, index) => <div key={event.chord} className={`absolute flex h-8 items-center justify-center rounded-md border text-xs font-bold shadow-[0_0_18px_currentColor] animate-[noteDrop_5s_linear_infinite] ${event.color === "red" ? "border-red-400 bg-red-500/80 text-red-100" : event.color === "yellow" ? "border-yellow-300 bg-yellow-400/80 text-yellow-950" : event.color === "blue" ? "border-blue-300 bg-blue-500/80 text-white" : event.color === "green" ? "border-emerald-300 bg-emerald-500/80 text-emerald-950" : "border-fuchsia-300 bg-fuchsia-500/80 text-white"}`} style={{ left: `${6 + event.lane * 18}%`, top: `${event.top}%`, width: `${8 + index * 1.2}%`, animationDelay: event.delay }}>{event.chord}</div>)}</div><div className="absolute inset-x-[4%] bottom-[27%] border-t border-fuchsia-500/60 shadow-[0_0_12px_#f43f5e]"><span className="absolute -top-3 left-0 bg-[#0b0b15] pr-3 font-mono text-xs font-bold text-fuchsia-400">OUVINDO</span></div><div className="absolute bottom-8 left-[4%] right-[4%] grid grid-cols-6 gap-2 sm:gap-5"><div className="h-11 rounded-full border-2 border-red-400/80 bg-red-500/10 shadow-[0_0_16px_#ef4444]" /><div className="h-11 rounded-full border-2 border-yellow-300/80 bg-yellow-400/10 shadow-[0_0_16px_#eab308]" /><div className="h-11 rounded-full border-2 border-blue-400/80 bg-blue-500/10 shadow-[0_0_16px_#3b82f6]" /><div className="h-11 rounded-full border-2 border-emerald-400/80 bg-emerald-500/10 shadow-[0_0_16px_#10b981]" /><div className="h-11 rounded-full border-2 border-fuchsia-400/80 bg-fuchsia-500/10 shadow-[0_0_16px_#d946ef]" /><div className="h-11 rounded-full border-2 border-cyan-400/80 bg-cyan-500/10 shadow-[0_0_16px_#06b6d4]" /></div></section>
+    <section className="px-2 py-3 sm:px-4"><div className="relative h-8 rounded bg-[#171625]"><div className="absolute left-0 top-1/2 h-1 w-full -translate-y-1/2 bg-[#2b2a3e]" /><div className="absolute left-0 top-1/2 h-1 w-[12%] -translate-y-1/2 bg-fuchsia-400 shadow-[0_0_10px_#f0f]" /><div className="absolute left-[12%] top-0 h-8 w-px bg-white" />{Array.from({ length: 13 }).map((_, index) => <span key={index} className="absolute top-1 text-[9px] text-muted-foreground" style={{ left: `${index * 8.3}%` }}>{index + 1}</span>)}</div><div className="mt-2 flex items-center justify-center gap-2"><button onClick={() => setProgress(Math.max(0, progress - 1))} className="grid size-9 place-items-center rounded-full bg-[#242337] text-muted-foreground"><RotateCcw className="size-4" /></button><button onClick={mode === "microphone" ? (listening ? stop : startMicrophone) : togglePlayback} className="grid size-11 place-items-center rounded-full bg-fuchsia-500 text-white shadow-[0_0_20px_#d946ef]">{playing || listening ? <Pause className="size-5 fill-current" /> : <Play className="ml-0.5 size-5 fill-current" />}</button><button onClick={() => setIsMuted(!isMuted)} className="grid size-9 place-items-center rounded-full bg-[#242337] text-muted-foreground"><Volume2 className="size-4" /></button><input aria-label="Volume" className="hidden accent-cyan-400 sm:block" type="range" min="0" max="100" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /><span className="ml-auto text-xs text-muted-foreground">00:12 / 00:49</span></div></section>
+    <section className="grid gap-3 px-2 pb-6 sm:px-4 lg:grid-cols-[1fr_420px]"><div className="rounded-2xl border border-[#302552] bg-[#12111e] p-4"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2"><span className={`size-2.5 rounded-full ${listening ? "animate-pulse bg-primary" : "bg-red-400"}`} /><strong className="text-sm text-primary">{listening ? "A OUVIR" : "PRONTO"}</strong></div><span className="text-xs text-muted-foreground">{status}</span></div><div className="grid gap-3 sm:grid-cols-[160px_1fr_160px]"><label className="rounded-xl border border-cyan-400/70 bg-[#171728] p-3 text-xs"><span className="block text-muted-foreground">FONTE</span><span className="mt-2 flex items-center gap-2 font-semibold"><Mic className="size-4 text-cyan-300" /> Microfone <ChevronDown className="ml-auto size-3" /></span><input className="sr-only" type="file" accept="audio/*" onChange={onFile} /></label><div className="rounded-xl bg-[#171728] p-3"><div className="flex items-center justify-between text-xs"><span className="text-muted-foreground">NOTA DETECTADA</span><strong className="text-2xl text-white">{detectedNote}</strong></div><div className="mt-3 flex h-8 items-end gap-0.5">{waveform.slice(0, 42).map((height, index) => <span key={index} className={`flex-1 rounded-t ${listening ? "bg-cyan-400/80" : "bg-cyan-400/20"}`} style={{ height: `${listening ? height : 18}%` }} />)}</div></div><div className="rounded-xl bg-[#171728] p-3"><span className="block text-xs text-muted-foreground">FREQUÊNCIA</span><strong className="mt-2 block text-xl">{detectedFrequency}</strong><span className="text-[10px] text-muted-foreground">{diagnostic}</span></div></div><div className="mt-4 flex flex-wrap items-center gap-2"><button onClick={startMicrophone} className="rounded-lg bg-cyan-400 px-4 py-2 text-xs font-bold text-slate-950"><Mic className="mr-1 inline size-3.5" /> Ativar microfone</button><label className="cursor-pointer rounded-lg border border-fuchsia-400/60 px-4 py-2 text-xs font-semibold text-fuchsia-200"><Headphones className="mr-1 inline size-3.5" /> Carregar música<input className="sr-only" type="file" accept="audio/*" onChange={onFile} /></label>{fileUrl && <button onClick={startFile} className="rounded-lg border border-primary/70 px-4 py-2 text-xs font-semibold text-primary">Analisar arquivo</button>}</div></div><aside className="rounded-2xl border border-[#302552] bg-[#12111e] p-4"><div className="flex items-start justify-between"><div><span className="text-[10px] font-bold uppercase text-muted-foreground">O QUE VOCÊ ESTÁ TOCANDO?</span><div className="mt-1 flex items-end gap-3"><strong className="text-5xl text-fuchsia-400">{detectedChord}</strong><span className="pb-1 text-xs text-muted-foreground">estimado · {Math.round(confidence)}%</span></div></div><Gauge className="size-5 text-cyan-300" /></div><div className="mt-5 grid grid-cols-2 gap-3 text-xs"><div><span className="text-muted-foreground">LIMPEZA</span><div className="mt-1 h-1.5 rounded bg-[#2b2a3e]"><div className="h-full w-[38%] rounded bg-fuchsia-400" /></div></div><div><span className="text-muted-foreground">SINAL</span><div className="mt-1 h-1.5 rounded bg-[#2b2a3e]"><div className="h-full rounded bg-cyan-400 transition-all" style={{ width: `${signal}%` }} /></div></div></div><div className="mt-5 flex items-center justify-between border-t border-[#2b2a3e] pt-4"><span className="text-xs text-muted-foreground">Próximo acorde</span><strong className="text-xl text-yellow-300">{detectedChord === "Em" ? "G" : "Em"}</strong></div></aside></section>
+    {fileUrl ? <audio ref={audioRef} src={fileUrl} onEnded={() => { setPlaying(false); setListening(false) }} className="hidden" /> : null}
   </main>
 }

@@ -77,4 +77,5 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .target span { position: relative; font: 800 11px var(--font-geist-mono), monospace; color: white; }
 .target-active { transform: scale(1.08); }
 .target-green { --target: #9cff57; }.target-red { --target: #ff6a62; }.target-yellow { --target: #ffe45c; }.target-blue { --target: #62a8ff; }
+@keyframes noteDrop { from { transform: translateY(-180px) scale(.65); opacity: .15; } 55% { opacity: 1; } to { transform: translateY(420px) scale(1); opacity: .95; } }
 @media (prefers-reduced-motion: reduce) { .falling-note { animation: none; } }
