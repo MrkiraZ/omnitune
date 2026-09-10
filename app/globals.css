@@ -79,4 +79,15 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .target-active { transform: scale(1.08); }
 .target-green { --target: #9cff57; }.target-red { --target: #ff6a62; }.target-yellow { --target: #ffe45c; }.target-blue { --target: #62a8ff; }
 @keyframes noteDrop { from { transform: translateY(-180px) scale(.65); opacity: .15; } 55% { opacity: 1; } to { transform: translateY(420px) scale(1); opacity: .95; } }
+.note-running { animation: noteDrop 2.4s ease-in forwards; }
+.fretboard { display: grid; gap: 3px; overflow-x: auto; border-radius: 12px; background: linear-gradient(90deg, oklch(.18 .04 35), oklch(.12 .025 255)); padding: 8px; }
+.fret-numbers, .guitar-string { display: grid; grid-template-columns: 42px repeat(6, minmax(42px, 1fr)); gap: 3px; min-width: 360px; }
+.fret-numbers { color: oklch(.62 .03 235); font: 10px var(--font-geist-mono), monospace; text-align: center; }
+.guitar-string { position: relative; align-items: center; }
+.guitar-string::before { content: ''; position: absolute; left: 42px; right: 0; top: 50%; height: 2px; background: oklch(1 0 0 / .24); box-shadow: 0 0 6px oklch(1 0 0 / .16); }
+.string-name { z-index: 1; color: oklch(.82 .18 190); font: 800 13px var(--font-geist-mono), monospace; text-align: center; }
+.fret-cell { z-index: 1; display: grid; min-height: 30px; place-items: center; border-left: 1px solid oklch(1 0 0 / .14); color: transparent; }
+.fret-cell i { display: grid; size: 22px; place-items: center; border-radius: 999px; font: 800 10px var(--font-geist-mono), monospace; font-style: normal; }
+.fret-lit i { background: oklch(.84 .19 133); color: oklch(.12 .02 255); box-shadow: 0 0 16px oklch(.84 .19 133); }
+@keyframes noteDrop { from { transform: translateY(-180px) scale(.65); opacity: .15; } 55% { opacity: 1; } to { transform: translateY(420px) scale(1); opacity: .95; } }
 @media (prefers-reduced-motion: reduce) { .falling-note { animation: none; } }
