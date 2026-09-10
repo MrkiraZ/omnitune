@@ -85,6 +85,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .mini-fret::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: oklch(1 0 0 / .35); }
 .mini-fret i { position: relative; z-index: 1; display: grid; size: 16px; place-items: center; border-radius: 999px; font-style: normal; }
 .mini-fret-lit i { background: oklch(.84 .19 133); color: oklch(.12 .02 255); box-shadow: 0 0 14px oklch(.84 .19 133); }
+.mini-fret-guide i { background: oklch(.78 .16 195 / .22); color: oklch(.86 .12 195); border: 1px dashed oklch(.78 .16 195 / .9); box-shadow: 0 0 12px oklch(.78 .16 195 / .38); }
 .fretboard { display: grid; gap: 3px; overflow-x: auto; border-radius: 12px; background: linear-gradient(90deg, oklch(.18 .04 35), oklch(.12 .025 255)); padding: 8px; }
 .fret-numbers, .guitar-string { display: grid; grid-template-columns: 42px repeat(6, minmax(42px, 1fr)); gap: 3px; min-width: 360px; }
 .fret-numbers { color: oklch(.62 .03 235); font: 10px var(--font-geist-mono), monospace; text-align: center; }
