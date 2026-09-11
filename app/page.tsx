@@ -1,80 +1,163 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, BookOpen, ChevronDown, Gauge, Headphones, Mic, Pause, Play, RotateCcw, Settings, Volume2, Waves } from "lucide-react"
+import { Headphones, Mic, Pause, Play, RotateCcw, Waves } from "lucide-react"
 
-type AudioMode = "microphone" | "file" | "demo"
-type DemoEvent = { label: string; kind: "note" | "chord"; degree: string; time: number; duration: number; color: string }
-type Track = { id: string; title: string; subtitle: string; bpm: number; key: string; events: DemoEvent[] }
+type NoteEvent = { note: string; string: number; fret: number; time: number }
+type Track = { id: string; title: string; description: string; key: string; bpm: number; events: NoteEvent[] }
 
 const tracks: Track[] = [
-  { id: "aranha", title: "Aranha 1-2-3-4", subtitle: "Exercício cromático · Iniciante", bpm: 60, key: "E", events: ["E", "F", "F#", "G", "G#", "A", "A#", "B", "C", "C#", "D", "D#"].map((label, i) => ({ label, kind: "note", degree: `${i + 1}`, time: i * 1.2, duration: .9, color: i % 2 ? "red" : "green" })) },
-  { id: "alegria", title: "Ode à Alegria", subtitle: "Melodia clássica · Beethoven", bpm: 72, key: "C", events: ["E", "E", "F", "G", "G", "F", "E", "D", "C", "C", "D", "E", "E", "D", "D"].map((label, i) => ({ label, kind: "note", degree: ["III", "III", "IV", "V"][i % 4], time: i * .9, duration: .7, color: i % 3 === 0 ? "yellow" : "blue" })) },
-  { id: "pop", title: "Loop Pop Essencial", subtitle: "Progressão de acordes · G maior", bpm: 84, key: "G", events: ["G", "D", "Em", "C", "G", "D", "Em", "C"].map((label, i) => ({ label, kind: "chord", degree: ["I", "V", "vi", "IV"][i % 4], time: i * 2.2, duration: 1.9, color: ["green", "blue", "purple", "yellow"][i % 4] })) },
-  { id: "smoke", title: "Smoke on the Water", subtitle: "Riff principal · Rock iniciante", bpm: 90, key: "G", events: ["G", "A#", "C", "G", "A#", "C", "G", "A#", "C", "D#"].map((label, i) => ({ label, kind: "note", degree: ["I", "♭III", "IV"][i % 3], time: i * 0.8, duration: .65, color: ["red", "yellow", "blue"][i % 3] })) },
-  { id: "blues", title: "Blues em E", subtitle: "Frase de improviso · Pentatônica", bpm: 78, key: "E", events: ["E", "G", "A", "B", "D", "B", "A", "G"].map((label, i) => ({ label, kind: "note", degree: ["I", "♭III", "IV", "V", "♭VII"][i % 5], time: i * 1.1, duration: .8, color: ["green", "purple", "yellow", "blue"][i % 4] })) },
+  { id: "spider", title: "Aranha 1-2-3-4", description: "Exercício de coordenação", key: "E", bpm: 60, events: ["E","F","F#","G","G#","A","A#","B","C","C#","D","D#"].map((note, i) => ({ note, string: 6, fret: i, time: i })) },
+  { id: "joy", title: "Ode à Alegria", description: "Melodia de Beethoven", key: "C", bpm: 72, events: ["E","E","F","G","G","F","E","D","C","C","D","E","E","D","D"].map((note, i) => ({ note, string: 1, fret: Math.max(0, i % 5), time: i })) },
+  { id: "smoke", title: "Smoke on the Water", description: "Riff principal", key: "G", bpm: 90, events: ["G","A#","C","G","A#","C","G","A#","C","D#"].map((note, i) => ({ note, string: 4, fret: [0,3,5,0,3,5,0,3,5,6][i], time: i })) },
 ]
 
-const harmonicFields: Record<string, { roman: string; chord: string; type: string }[]> = {
-  C: [{ roman: "I", chord: "C", type: "maior" }, { roman: "ii", chord: "Dm", type: "menor" }, { roman: "iii", chord: "Em", type: "menor" }, { roman: "IV", chord: "F", type: "maior" }, { roman: "V", chord: "G", type: "maior" }, { roman: "vi", chord: "Am", type: "menor" }, { roman: "vii°", chord: "Bdim", type: "diminuto" }],
-  G: [{ roman: "I", chord: "G", type: "maior" }, { roman: "ii", chord: "Am", type: "menor" }, { roman: "iii", chord: "Bm", type: "menor" }, { roman: "IV", chord: "C", type: "maior" }, { roman: "V", chord: "D", type: "maior" }, { roman: "vi", chord: "Em", type: "menor" }, { roman: "vii°", chord: "F#dim", type: "diminuto" }],
-  E: [{ roman: "I", chord: "E", type: "maior" }, { roman: "ii", chord: "F#m", type: "menor" }, { roman: "iii", chord: "G#m", type: "menor" }, { roman: "IV", chord: "A", type: "maior" }, { roman: "V", chord: "B", type: "maior" }, { roman: "vi", chord: "C#m", type: "menor" }, { roman: "vii°", chord: "D#dim", type: "diminuto" }],
-}
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+const harmonic: Record<string, string[]> = { C: ["C", "Dm", "Em", "F", "G", "Am"], G: ["G", "Am", "Bm", "C", "D", "Em"], E: ["E", "F#m", "G#m", "A", "B", "C#m"] }
+const strings = ["e", "B", "G", "D", "A", "E"]
 
-function autoCorrelate(buffer: Float32Array, sampleRate: number) { let rms = 0; for (const value of buffer) rms += value * value; rms = Math.sqrt(rms / buffer.length); if (rms < .006) return { rms, frequency: null as number | null }; let best = -1; let corr = 0; for (let offset = Math.floor(sampleRate / 1000); offset < Math.min(Math.floor(sampleRate / 55), buffer.length - 1); offset += 2) { let sum = 0; for (let i = 0; i < buffer.length - offset; i += 3) sum += 1 - Math.abs(buffer[i] - buffer[i + offset]); sum /= buffer.length / 3; if (sum > corr) { corr = sum; best = offset } } return { rms, frequency: best > 0 && corr > .42 ? sampleRate / best : null } }
-function frequencyToNote(frequency: number | null) { if (!frequency || frequency < 45 || frequency > 1400) return null; const midi = Math.round(69 + 12 * Math.log2(frequency / 440)); return { name: noteNames[(midi % 12 + 12) % 12], frequency: Math.round(frequency) } }
-function detectPolyphonic(buffer: Float32Array, sampleRate: number) {
+function detectPitch(buffer: Float32Array, sampleRate: number) {
   let rms = 0
   for (const value of buffer) rms += value * value
   rms = Math.sqrt(rms / buffer.length)
-  if (rms < .006) return { rms, label: null as string | null, root: null as string | null, frequency: null as number | null }
-  const energy = new Array(12).fill(0) as number[]
-  let strongest = 0
-  let strongestHz = 0
-  for (let midi = 28; midi <= 88; midi++) {
-    const frequency = 440 * Math.pow(2, (midi - 69) / 12)
-    const period = sampleRate / frequency
+  if (rms < 0.012) return { rms, note: null as string | null, frequency: null as number | null }
+  let bestOffset = -1
+  let bestCorrelation = 0
+  for (let offset = Math.floor(sampleRate / 1000); offset < Math.min(Math.floor(sampleRate / 70), buffer.length - 1); offset += 2) {
     let correlation = 0
-    for (let i = 0; i < buffer.length - period; i += 4) correlation += buffer[i] * buffer[Math.floor(i + period)]
-    energy[midi % 12] += Math.max(0, correlation) / (buffer.length / 4)
-    if (energy[midi % 12] > strongest) { strongest = energy[midi % 12]; strongestHz = frequency }
+    for (let i = 0; i < buffer.length - offset; i += 4) correlation += 1 - Math.abs(buffer[i] - buffer[i + offset])
+    correlation /= buffer.length / 4
+    if (correlation > bestCorrelation) { bestCorrelation = correlation; bestOffset = offset }
   }
-  const order = energy.map((value, index) => ({ value, index })).sort((a, b) => b.value - a.value)
-  const root = order[0]?.index ?? 0
-  const candidates = order.filter(item => item.value > order[0].value * .38).map(item => item.index)
-  const has = (offset: number) => candidates.includes((root + offset) % 12)
-  let label = noteNames[root]
-  if (has(3) && has(7)) label += "m"
-  else if (has(4) && has(7)) label = noteNames[root]
-  const detected = noteNames[root]
-  return { rms, label, root: detected, frequency: strongestHz }
-} 
+  if (bestOffset < 0 || bestCorrelation < 0.45) return { rms, note: null, frequency: null }
+  const frequency = sampleRate / bestOffset
+  if (frequency < 70 || frequency > 1200) return { rms, note: null, frequency }
+  const midi = Math.round(69 + 12 * Math.log2(frequency / 440))
+  return { rms, note: noteNames[(midi % 12 + 12) % 12], frequency }
+}
 
 export default function Home() {
-  const [track, setTrack] = useState(tracks[0]); const [mode, setMode] = useState<AudioMode>("microphone"); const [listening, setListening] = useState(false); const [playing, setPlaying] = useState(false); const [status, setStatus] = useState("Pronto para ouvir"); const [diagnostic, setDiagnostic] = useState("Microfone não iniciado"); const [signal, setSignal] = useState(0); const [detectedNote, setDetectedNote] = useState("—"); const [detectedFrequency, setDetectedFrequency] = useState("—"); const [feedback, setFeedback] = useState("Escolha uma faixa ou ative o microfone"); const [progress, setProgress] = useState(0); const [fileUrl, setFileUrl] = useState(""); const [fileName, setFileName] = useState(""); const [volume, setVolume] = useState(62); const [isMuted, setIsMuted] = useState(false);   const [score, setScore] = useState(0); const [combo, setCombo] = useState(0); const [accuracy, setAccuracy] = useState(0); const [recentNotes, setRecentNotes] = useState<string[]>([]); const [target, setTarget] = useState<DemoEvent | null>(null)
-  const [eventIndex, setEventIndex] = useState(0); const [hitFlash, setHitFlash] = useState<"hit" | "miss" | null>(null); const [demoElapsed, setDemoElapsed] = useState(0); const [libraryOpen, setLibraryOpen] = useState(false); const [started, setStarted] = useState(false); const [freePlay, setFreePlay] = useState(false)
-  const demoTimerRef = useRef<number | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null); const contextRef = useRef<AudioContext | null>(null); const analyserRef = useRef<AnalyserNode | null>(null); const streamRef = useRef<MediaStream | null>(null); const sourceRef = useRef<MediaStreamAudioSourceNode | MediaElementAudioSourceNode | null>(null); const rafRef = useRef<number | null>(null); const lastNoteRef = useRef(""); const acceptedNoteRef = useRef(""); const lastCandidateRef = useRef(""); const candidateCountRef = useRef(0)
-  const field = harmonicFields[track.key] || harmonicFields.C
-  const stop = useCallback(() => { if (rafRef.current) cancelAnimationFrame(rafRef.current); if (demoTimerRef.current) window.clearInterval(demoTimerRef.current); streamRef.current?.getTracks().forEach(t => t.stop()); contextRef.current?.close(); streamRef.current = null; sourceRef.current = null; contextRef.current = null; analyserRef.current = null; demoTimerRef.current = null; setListening(false); setPlaying(false); setSignal(0); setStatus("Pronto para ouvir") }, [])
-  const analyze = useCallback(() => { const analyser = analyserRef.current; const context = contextRef.current; if (!analyser || !context) return; const data = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(data); const result = detectPolyphonic(data, context.sampleRate); const level = Math.min(100, Math.round(result.rms * 2100)); setSignal(level); if (result.label) { setDetectedNote(result.label); setDetectedFrequency(`${Math.round(result.frequency || 0)} Hz`); setStatus(result.label.includes("m") ? "Acorde menor detectado" : "Nota/acorde detectado"); setRecentNotes(c => [result.label!, ...c.filter(n => n !== result.label)].slice(0, 6)); if (lastCandidateRef.current === result.label) candidateCountRef.current += 1; else { lastCandidateRef.current = result.label; candidateCountRef.current = 1 } if (candidateCountRef.current >= 4 && acceptedNoteRef.current !== result.label) { acceptedNoteRef.current = result.label; lastNoteRef.current = result.label; registerPracticeNote(result.label) } } else if (level < 3) { lastCandidateRef.current = ""; candidateCountRef.current = 0; acceptedNoteRef.current = ""; setStatus("Sem sinal — toque perto do microfone"); setDetectedNote("—"); setDetectedFrequency("—") } else setStatus("Sinal detectado — analisando cordas"); rafRef.current = requestAnimationFrame(analyze) }, [eventIndex, target, track.events, freePlay])
-  const startMicrophone = async () => { try { stop(); setStatus("Solicitando permissão..."); const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); const context = new AudioContext(); await context.resume(); const analyser = context.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = .2; const source = context.createMediaStreamSource(stream); source.connect(analyser); streamRef.current = stream; sourceRef.current = source; contextRef.current = context; analyserRef.current = analyser; setMode("microphone"); setListening(true); setDiagnostic(`Microfone ativo: ${stream.getAudioTracks()[0]?.label || "entrada padrão"}`); setStatus("Ouvindo — toque uma nota"); analyze() } catch (e) { setDiagnostic(e instanceof Error ? e.message : "Permissão bloqueada"); setStatus("Microfone indisponível — libere a permissão") } }
-  const startFile = async () => { if (!fileUrl || !audioRef.current) return; try { stop(); const context = new AudioContext(); await context.resume(); const analyser = context.createAnalyser(); analyser.fftSize = 4096; const source = context.createMediaElementSource(audioRef.current); source.connect(analyser); analyser.connect(context.destination); contextRef.current = context; analyserRef.current = analyser; sourceRef.current = source; setMode("file"); setListening(true); setPlaying(true); setStatus("Analisando áudio"); setDiagnostic(`Arquivo: ${fileName}`); await audioRef.current.play(); analyze() } catch { setStatus("Não foi possível analisar este arquivo") } }
-  const playReference = useCallback(() => { const C = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext; if (!C || !target) return; const context = new C(); const hz: Record<string, number> = { C: 261.63, D: 293.66, E: 329.63, F: 349.23, G: 392, A: 440, B: 493.88 }; const root = hz[target.label.replace("m", "")] || 329.63; [1, 1.25, 1.5].forEach((ratio, i) => { const o = context.createOscillator(); const g = context.createGain(); o.type = "triangle"; o.frequency.value = root * ratio; g.gain.setValueAtTime(.0001, context.currentTime); g.gain.exponentialRampToValueAtTime(.11, context.currentTime + .03); g.gain.exponentialRampToValueAtTime(.0001, context.currentTime + 1.1); o.connect(g).connect(context.destination); o.start(context.currentTime + i * .03); o.stop(context.currentTime + 1.2) }); window.setTimeout(() => context.close(), 1400) }, [target])
-  const chooseTrack = (next: Track) => { stop(); setTrack(next); setEventIndex(0); setDemoElapsed(0); setProgress(0); setScore(0); setCombo(0); setAccuracy(0); setHitFlash(null); lastNoteRef.current = ""; setFeedback(`Faixa selecionada: ${next.title}`); setTarget(next.events[0]) }
-  const registerPracticeNote = (label: string) => { const clean = label.replace(/m$/, ""); setDetectedNote(label); setDetectedFrequency("entrada manual"); setStatus(`Nota ${label} selecionada`); setRecentNotes(c => [label, ...c.filter(n => n !== label)].slice(0, 6)); if (freePlay) { setFeedback(`Você tocou ${label} · escolha outra nota para continuar`); setHitFlash("hit"); window.setTimeout(() => setHitFlash(null), 450); return } const expected = track.events[eventIndex]?.label || target?.label || "—"; const hit = clean === expected.replace(/m$/, ""); if (hit) { setFeedback(`Acertou ${label} · próxima: ${track.events[eventIndex + 1]?.label || "fim da faixa"}`); setScore(s => s + 100); setCombo(c => c + 1); setAccuracy(a => Math.round(a * .7 + 30)); setHitFlash("hit"); if (eventIndex < track.events.length - 1) { setEventIndex(i => i + 1) } } else { setFeedback(`Você tocou ${label} · ainda falta ${expected}`); setCombo(0); setHitFlash("miss") } window.setTimeout(() => setHitFlash(null), 450) }
-  useEffect(() => { setEventIndex(0); setTarget(track.events[0]); lastNoteRef.current = ""; acceptedNoteRef.current = ""; lastCandidateRef.current = ""; candidateCountRef.current = 0 }, [track]); useEffect(() => () => stop(), [stop]); useEffect(() => { setTarget(track.events[Math.min(eventIndex, track.events.length - 1)] || track.events[0]); setProgress(Math.min(eventIndex, track.events.length - 1)) }, [eventIndex, track.events])
-  const waveform = useMemo(() => Array.from({ length: 72 }, (_, i) => 12 + ((i * 29) % 70)), []); const next = track.events[Math.min(eventIndex + 1, track.events.length - 1)] || track.events[0]; const detectedRoot = detectedNote.replace(/m$/, "").replace(/[0-9]/g, ""); const harmonicSuggestion = field.find(item => item.chord.replace(/m$/, "") === detectedRoot) ? field[(field.findIndex(item => item.chord.replace(/m$/, "") === detectedRoot) + 1) % field.length] : field[0]; const isNoteLit = (label: string) => detectedRoot === label.replace(/m$/, "").replace(/[0-9]/g, ""); const guideLabel = freePlay ? harmonicSuggestion.chord : next.label; const isGuideLit = (label: string) => detectedRoot === label.replace(/m$/, "").replace(/[0-9]/g, ""); const isNextGuideLit = (label: string) => guideLabel.replace(/m$/, "") === label.replace(/m$/, "").replace(/[0-9]/g, ""); const onFile = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (!f) return; if (fileUrl) URL.revokeObjectURL(fileUrl); setFileName(f.name); setFileUrl(URL.createObjectURL(f)); setMode("file"); setFeedback("Arquivo pronto — pressione analisar") }
-  return <main className="min-h-screen bg-[#090912] text-foreground"><header className="flex h-16 items-center gap-4 border-b border-[#252443] bg-[#12111e] px-3 sm:px-6"><button className="grid size-10 place-items-center rounded-xl bg-[#242337]" aria-label="Voltar"><ArrowLeft className="size-5" /></button><div className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-fuchsia-500 to-cyan-400"><Waves className="size-5" /></div><div><strong className="text-lg">OmniTune</strong><p className="hidden text-[11px] text-muted-foreground sm:block">MODO APRENDER · biblioteca de exercícios</p></div><div className="ml-auto hidden items-center gap-8 text-center sm:flex"><div><p className="text-[10px] text-muted-foreground">BPM</p><strong className="text-2xl">{track.bpm}</strong></div><div><p className="text-[10px] text-muted-foreground">PONTOS</p><strong className="text-2xl text-cyan-300">{score}</strong></div></div><button className="grid size-9 place-items-center rounded-full border border-cyan-400/70 text-cyan-300"><Settings className="size-4" /></button><button className="grid size-9 place-items-center rounded-full border border-fuchsia-400/70 text-fuchsia-300"><BookOpen className="size-4" /></button></header>
-    <section className="flex flex-wrap items-center justify-between gap-3 border-b border-[#252443] bg-[#0e0d18] px-3 py-3 sm:px-6"><div className="flex items-center gap-3"><span className="font-mono text-xs text-muted-foreground">FAIXA ATUAL</span><strong className="text-sm">{track.title}</strong><span className="rounded-full bg-primary/15 px-2 py-1 text-[10px] font-bold text-primary">{track.subtitle}</span></div><div className="flex items-center gap-2"><button onClick={() => setLibraryOpen(v => !v)} className="rounded-lg border border-fuchsia-400/60 px-3 py-2 text-xs font-bold text-fuchsia-200"><ChevronDown className={`mr-1 inline size-4 transition ${libraryOpen ? "rotate-180" : ""}`} /> Biblioteca</button><label className="flex cursor-pointer items-center gap-2 rounded-lg border border-cyan-400/50 px-3 py-2 text-xs font-bold text-cyan-200"><Headphones className="size-4" /> Importar<input className="sr-only" type="file" accept="audio/*" onChange={onFile} /></label></div></section>
-    {libraryOpen && <section className="grid gap-2 border-b border-[#252443] bg-[#0b0b15] px-3 py-3 sm:grid-cols-2 lg:grid-cols-4 sm:px-6">{tracks.map(item => <button key={item.id} onClick={() => { chooseTrack(item); setLibraryOpen(false) }} className={`rounded-xl border p-3 text-left transition ${track.id === item.id ? "border-fuchsia-400 bg-fuchsia-500/15" : "border-[#302552] bg-[#12111e] hover:border-cyan-400/60"}`}><span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{item.bpm} BPM · TOM {item.key}</span><strong className="mt-1 block text-sm">{item.title}</strong><span className="text-xs text-muted-foreground">{item.subtitle}</span></button>)}</section>}
-    <section className="mx-2 mt-2 grid gap-2 sm:mx-4 sm:grid-cols-[1fr_auto]">
-      <div className="rounded-2xl border border-cyan-400/25 bg-[#10101c] px-3 py-3 sm:px-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300">Objetivo do treino</p><p className="mt-1 text-sm text-muted-foreground">{freePlay ? "Toque livre — cada nota ouvida acende o braço" : `Encontre ${target?.label || "—"} para avançar`}</p></div><div className="flex gap-2"><button onClick={() => setFreePlay(false)} className={`rounded-lg px-3 py-2 text-xs font-bold ${!freePlay ? "bg-fuchsia-500 text-white" : "border border-white/10 text-muted-foreground"}`}>Modo música</button><button onClick={() => setFreePlay(true)} className={`rounded-lg px-3 py-2 text-xs font-bold ${freePlay ? "bg-cyan-400 text-slate-950" : "border border-white/10 text-muted-foreground"}`}>Free play</button></div></div><div className="mt-3 flex items-center gap-3"><div className="grid size-14 place-items-center rounded-xl border border-fuchsia-400/50 bg-fuchsia-500/10 text-center"><strong className="text-xl text-fuchsia-200">{freePlay ? (detectedNote === "—" ? "—" : detectedNote) : (target?.label || "—")}</strong><span className="block text-[9px] text-muted-foreground">{freePlay ? "ouvida" : "alvo"}</span></div><div className="text-xs"><p className="font-semibold text-foreground">{freePlay ? "Sugestão harmônica: " : "Próximo: "}<span className="text-cyan-300">{freePlay ? harmonicSuggestion.chord : next.label}</span></p><p className="mt-1 text-muted-foreground">{freePlay ? `${harmonicSuggestion.roman} grau · toque ${harmonicSuggestion.chord} depois de ${detectedNote === "—" ? "sua nota" : detectedNote}` : (field.find(item => item.chord.replace("m", "") === next.label.replace("m", "")) ? "Dentro do campo harmônico" : "Fora do campo — atenção")}</p></div></div></div>
+  const [track, setTrack] = useState(tracks[0])
+  const [mode, setMode] = useState<"song" | "free">("song")
+  const [targetIndex, setTargetIndex] = useState(0)
+  const [detected, setDetected] = useState<string | null>(null)
+  const [frequency, setFrequency] = useState<number | null>(null)
+  const [listening, setListening] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [message, setMessage] = useState("Ative o microfone e toque uma nota")
+  const [score, setScore] = useState(0)
+  const [combo, setCombo] = useState(0)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [lastAccepted, setLastAccepted] = useState<string | null>(null)
+  const audioContext = useRef<AudioContext | null>(null)
+  const analyser = useRef<AnalyserNode | null>(null)
+  const stream = useRef<MediaStream | null>(null)
+  const raf = useRef<number | null>(null)
+  const stableNote = useRef("")
+  const stableCount = useRef(0)
+  const acceptedForTarget = useRef(false)
+
+  const current = track.events[targetIndex]
+  const next = track.events[targetIndex + 1]
+  const suggestion = harmonic[track.key]?.[(targetIndex + 1) % (harmonic[track.key]?.length || 1)] || "C"
+  const targetNote = current?.note || "—"
+
+  const stopMicrophone = useCallback(() => {
+    if (raf.current) cancelAnimationFrame(raf.current)
+    stream.current?.getTracks().forEach((item) => item.stop())
+    audioContext.current?.close()
+    raf.current = null
+    stream.current = null
+    audioContext.current = null
+    analyser.current = null
+    setListening(false)
+  }, [])
+
+  const handleDetected = useCallback((note: string) => {
+    setDetected(note)
+    if (mode === "free") {
+      setMessage(`Você tocou ${note}. Próxima sugestão: ${suggestion}`)
+      return
+    }
+    if (acceptedForTarget.current) return
+    if (note === targetNote) {
+      acceptedForTarget.current = true
+      setLastAccepted(note)
+      setScore((value) => value + 100)
+      setCombo((value) => value + 1)
+      setMessage(`Acertou ${note}. Prepare ${next?.note || "fim da música"}`)
+      window.setTimeout(() => {
+        setTargetIndex((value) => Math.min(value + 1, track.events.length - 1))
+        acceptedForTarget.current = false
+        setLastAccepted(null)
+        stableNote.current = ""
+        stableCount.current = 0
+      }, 650)
+    } else {
+      setCombo(0)
+      setMessage(`Você tocou ${note}. Ainda falta ${targetNote}`)
+    }
+  }, [mode, next?.note, suggestion, targetNote, track.events.length])
+
+  const analyze = useCallback(() => {
+    const currentAnalyser = analyser.current
+    const context = audioContext.current
+    if (!currentAnalyser || !context) return
+    const data = new Float32Array(currentAnalyser.fftSize)
+    currentAnalyser.getFloatTimeDomainData(data)
+    const result = detectPitch(data, context.sampleRate)
+    setFrequency(result.frequency)
+    if (result.note) {
+      if (stableNote.current === result.note) stableCount.current += 1
+      else { stableNote.current = result.note; stableCount.current = 1 }
+      if (stableCount.current >= 3) handleDetected(result.note)
+    } else {
+      stableNote.current = ""
+      stableCount.current = 0
+    }
+    raf.current = requestAnimationFrame(analyze)
+  }, [handleDetected])
+
+  const startMicrophone = async () => {
+    try {
+      stopMicrophone()
+      const nextStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      const context = new AudioContext()
+      await context.resume()
+      const nextAnalyser = context.createAnalyser()
+      nextAnalyser.fftSize = 4096
+      nextAnalyser.smoothingTimeConstant = 0.15
+      context.createMediaStreamSource(nextStream).connect(nextAnalyser)
+      stream.current = nextStream
+      audioContext.current = context
+      analyser.current = nextAnalyser
+      setListening(true)
+      setMessage("Ouvindo. Toque uma nota por vez")
+      analyze()
+    } catch {
+      setMessage("Microfone bloqueado. Libere a permissão do navegador")
+    }
+  }
+
+  const selectTrack = (item: Track) => {
+    setTrack(item); setTargetIndex(0); setDetected(null); setLastAccepted(null); setScore(0); setCombo(0); setRunning(false); acceptedForTarget.current = false; setMessage(`Faixa selecionada: ${item.title}`)
+  }
+
+  useEffect(() => () => stopMicrophone(), [stopMicrophone])
+  const fretPositions = useMemo(() => Array.from({ length: 13 }, (_, index) => index), [])
+
+  return <main className="min-h-screen bg-[#090912] text-white">
+    <header className="flex items-center gap-3 border-b border-[#29243f] bg-[#12111e] px-3 py-3 sm:px-6"><div className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-fuchsia-500 to-cyan-400"><Waves className="size-5" /></div><div><strong className="text-lg">OmniTune</strong><p className="hidden text-xs text-slate-400 sm:block">Treine uma nota por vez, sem adivinhação</p></div><div className="ml-auto flex items-center gap-4 text-right"><div><small className="block text-[10px] text-slate-400">BPM</small><b>{track.bpm}</b></div><div><small className="block text-[10px] text-slate-400">PONTOS</small><b className="text-cyan-300">{score}</b></div></div></header>
+    <section className="mx-auto max-w-6xl px-3 py-4 sm:px-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-widest text-cyan-300">Treino atual</p><h1 className="text-xl font-bold">{track.title}</h1><p className="text-sm text-slate-400">{track.description} · Tom {track.key}</p></div><div className="flex gap-2"><button onClick={() => setLibraryOpen((value) => !value)} className="rounded-lg border border-fuchsia-400/60 px-3 py-2 text-xs font-bold">Biblioteca</button><button onClick={listening ? stopMicrophone : startMicrophone} className="flex items-center gap-2 rounded-lg bg-cyan-400 px-3 py-2 text-xs font-bold text-slate-950"><Mic className="size-4" />{listening ? "Parar microfone" : "Ativar microfone"}</button></div></div>
+      {libraryOpen && <div className="mt-3 grid gap-2 sm:grid-cols-3">{tracks.map((item) => <button key={item.id} onClick={() => { selectTrack(item); setLibraryOpen(false) }} className={`rounded-xl border p-3 text-left ${item.id === track.id ? "border-cyan-300 bg-cyan-400/10" : "border-[#302552] bg-[#12111e]"}`}><b className="block text-sm">{item.title}</b><span className="text-xs text-slate-400">{item.description} · {item.bpm} BPM</span></button>)}</div>}
     </section>
-    <section className="relative mx-2 mt-2 h-[390px] overflow-hidden rounded-2xl border border-[#302552] bg-[#0b0b15] sm:mx-4 sm:h-[480px]"><div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-indigo-950/60 to-transparent" /><div className="absolute inset-x-[4%] bottom-0 top-16 grid grid-cols-8 [transform:perspective(900px)_rotateX(12deg)] [transform-origin:bottom]">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="border-x border-white/[0.055]" />)}</div><div className="absolute inset-x-[4%] bottom-0 top-16">{track.events.slice(eventIndex, eventIndex + 2).map((event, i) => <div key={`${event.label}-${event.time}`} className={`falling-note note-${event.color} note-${i % 8} ${i === 0 && started ? "note-running" : ""} ${isNoteLit(event.label) ? "note-lit" : ""} ${isNextGuideLit(event.label) ? "note-guide" : ""}`} style={{ animationPlayState: playing || mode === "microphone" ? "running" : "paused", animationIterationCount: 1, animationDelay: `${i * 0.65}s` }}><span>{event.label}</span>{isNoteLit(event.label) && <b className="sr-only">Nota tocada agora</b>}</div>)}</div><div className="absolute inset-x-[4%] bottom-[24%] border-t border-fuchsia-500/70 shadow-[0_0_14px_#f43f5e]"><span className="absolute -top-3 left-0 bg-[#0b0b15] pr-3 font-mono text-xs font-bold text-fuchsia-400">OUVINDO</span>{detectedNote !== "—" && <span className="absolute -top-10 right-0 rounded-lg border border-cyan-300 bg-cyan-300 px-3 py-1 font-mono text-xs font-black text-slate-950 shadow-[0_0_22px_#67e8f9]">TOCANDO: {detectedNote}</span>}</div><div className="absolute bottom-4 left-[4%] right-[4%] rounded-xl border border-white/10 bg-[#090912]/90 p-2 backdrop-blur"><div className="mb-1 flex items-center justify-between px-1"><span className="font-mono text-[9px] uppercase tracking-widest text-cyan-300">Braço · toque a corda indicada</span><span className="font-mono text-[9px] text-muted-foreground">E A D G B e · casas 0–12</span></div><div className="overflow-x-auto pb-1">{["E","A","D","G","B","e"].map((string, row) => <div key={string} className="mini-string"><span className="mini-string-name">{string}</span>{[0,1,2,3,4,5,6,7,8,9,10,11,12].map(fret => { const open = ["E","A","D","G","B","E"][row]; const pitch = noteNames[(noteNames.indexOf(open) + fret) % 12]; const lit = isNoteLit(pitch); return <span key={`${string}-${fret}`} className={`mini-fret ${lit ? "mini-fret-lit" : ""}`}><i>{lit ? pitch : fret}</i></span> })}</div>)}</div></div></section>
-    <section className="px-2 py-3 sm:px-4"><div className="relative h-8 rounded bg-[#171625]"><div className="absolute left-0 top-1/2 h-1 w-full -translate-y-1/2 bg-[#2b2a3e]" /><div className="absolute left-0 top-1/2 h-1 -translate-y-1/2 bg-fuchsia-400 shadow-[0_0_10px_#f0f]" style={{ width: `${(progress / track.events.length) * 100}%` }} /><input aria-label="Progresso da faixa" type="range" min="0" max={track.events.length - 1} value={progress} onChange={e => setProgress(Number(e.target.value))} className="absolute inset-0 w-full opacity-0" />{track.events.map((_, i) => <span key={i} className="absolute top-1 text-[9px] text-muted-foreground" style={{ left: `${(i / (track.events.length - 1)) * 100}%` }}>{i + 1}</span>)}</div><div className="mt-2 flex items-center justify-center gap-2"><button aria-label="Replay da faixa" onClick={() => { setEventIndex(0); setProgress(0); setScore(0); setCombo(0); setAccuracy(0); setFeedback("Faixa reiniciada — pressione Start") }} className="flex h-9 items-center gap-1 rounded-full bg-[#242337] px-3 text-xs font-bold"><RotateCcw className="size-4" /> Replay</button><button aria-label={started ? "Pausar treino" : "Iniciar treino"} onClick={() => { setStarted(v => !v); if (mode === "microphone") { if (listening) stop(); else startMicrophone() } else if (playing) { audioRef.current?.pause(); setPlaying(false) } else startFile() }} className="flex h-11 items-center gap-2 rounded-full bg-fuchsia-500 px-4 font-bold text-white shadow-[0_0_20px_#d946ef]">{started || playing || listening ? <Pause className="size-5 fill-current" /> : <Play className="size-5 fill-current" />}<span>{started || playing || listening ? "Pausar" : "Start"}</span></button><button onClick={() => setIsMuted(!isMuted)} className="grid size-9 place-items-center rounded-full bg-[#242337]"><Volume2 className="size-4" /></button><input aria-label="Volume" className="hidden accent-cyan-400 sm:block" type="range" min="0" max="100" value={volume} onChange={e => setVolume(Number(e.target.value))} /><span className="ml-auto text-xs text-muted-foreground">{progress + 1} / {track.events.length}</span></div></section>
-    <button onClick={listening ? stop : startMicrophone} className="mic-dock fixed bottom-3 left-3 right-3 z-20 flex items-center justify-between rounded-2xl border border-cyan-300/60 bg-[#111827]/95 px-4 py-3 text-left shadow-[0_0_28px_#22d3ee33] backdrop-blur sm:hidden"><span className="flex items-center gap-3"><span className={`grid size-9 place-items-center rounded-full ${listening ? "bg-primary text-primary-foreground" : "bg-cyan-400/15 text-cyan-300"}`}><Mic className="size-5" /></span><span><strong className="block text-sm">{listening ? "Microfone ouvindo" : "Ativar microfone"}</strong><span className="text-[11px] text-muted-foreground">{listening ? detectedNote === "—" ? "Toque uma nota" : `Detectado: ${detectedNote}` : "Disponível durante o jogo"}</span></span></span><span className="rounded-lg bg-cyan-400 px-3 py-2 text-xs font-black text-slate-950">{listening ? "Parar" : "Ativar"}</span></button>
-    <section className="mx-2 mb-3 grid gap-3 sm:mx-4 lg:grid-cols-[1fr_1.1fr_1fr]"><div className="rounded-2xl border border-fuchsia-400/30 bg-[#12111e] p-4"><p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Agora</p><div className="mt-2 flex items-end justify-between"><strong className="text-5xl text-fuchsia-300">{target?.label || "—"}</strong><button onClick={playReference} className="rounded-lg bg-fuchsia-500/20 px-3 py-2 text-xs font-bold text-fuchsia-200"><Volume2 className="mr-1 inline size-3.5" /> Ouvir</button></div><p className="mt-2 text-xs text-muted-foreground">Grau {target?.degree} · {track.key} maior</p><div className="mt-3 rounded-lg border border-cyan-400/25 bg-cyan-400/5 p-3"><span className="text-[10px] font-bold uppercase text-muted-foreground">Próximo</span><div className="mt-1 flex items-center justify-between"><strong className="text-2xl text-cyan-200">{next.label}</strong><span className="text-xs text-cyan-300">Grau {next.degree}</span></div></div></div><div className={`rounded-2xl border p-4 ${feedback.startsWith("Acertou") ? "border-emerald-400/60 bg-emerald-950/30" : "border-cyan-400/30 bg-[#12111e]"}`}><p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Feedback ao vivo</p><strong className="mt-3 block text-xl">{feedback}</strong><div className="mt-4 flex items-center gap-6"><div><span className="block text-[10px] text-muted-foreground">COMBO</span><strong className="text-2xl text-primary">{combo}x</strong></div><div><span className="block text-[10px] text-muted-foreground">PRECISÃO</span><strong className="text-2xl text-cyan-300">{accuracy}%</strong></div><div><span className="block text-[10px] text-muted-foreground">SINAL</span><strong className="text-2xl text-white">{signal}%</strong></div></div></div><div className="rounded-2xl border border-[#302552] bg-[#12111e] p-4"><p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Campo harmônico de {track.key}</p><div className="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-7">{field.map(item => <div key={item.roman} className={`rounded-lg border p-2 text-center ${target?.label === item.chord ? "border-fuchsia-300 bg-fuchsia-500/25" : next.label === item.chord ? "border-cyan-300 bg-cyan-400/10" : "border-white/10 bg-white/[.03]"}`}><span className="block text-[10px] text-muted-foreground">{item.roman}</span><strong className="text-sm">{item.chord}</strong><span className="block truncate text-[9px] text-muted-foreground">{item.type}</span></div>)}</div><p className="mt-3 text-xs text-muted-foreground"><span className="text-fuchsia-300">● atual</span> · <span className="text-cyan-300">● próximo</span> · improvise usando as notas de {track.key} maior</p></div></section>
-    <section className="mx-2 mb-6 rounded-2xl border border-[#302552] bg-[#12111e] p-4 sm:mx-4"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2"><span className={`size-2.5 rounded-full ${listening ? "animate-pulse bg-primary" : "bg-red-400"}`} /><strong className="text-sm text-primary">{listening ? "A OUVIR" : "PRONTO"}</strong></div><span className="text-xs text-muted-foreground">{status}</span></div><div className="grid gap-3 sm:grid-cols-[180px_1fr_180px]"><button onClick={startMicrophone} className="rounded-xl border border-cyan-400/70 bg-[#171728] p-3 text-left text-xs"><span className="block text-muted-foreground">FONTE</span><span className="mt-2 flex items-center gap-2 font-semibold"><Mic className="size-4 text-cyan-300" /> Microfone <ChevronDown className="ml-auto size-3" /></span></button><div className="rounded-xl bg-[#171728] p-3"><div className="flex items-center justify-between text-xs"><span className="text-muted-foreground">NOTA DETECTADA</span><strong className="text-2xl">{detectedNote}</strong></div><div className="mt-3 flex h-8 items-end gap-0.5">{waveform.slice(0, 42).map((h, i) => <span key={i} className={`flex-1 rounded-t ${listening ? "bg-cyan-400/80" : "bg-cyan-400/20"}`} style={{ height: `${listening ? h : 18}%` }} />)}</div></div><div className="rounded-xl bg-[#171728] p-3"><span className="block text-xs text-muted-foreground">FREQUÊNCIA / DIAGNÓSTICO</span><strong className="mt-2 block text-xl">{detectedFrequency}</strong><span className="text-[10px] text-muted-foreground">{diagnostic}</span></div></div><div className="mt-4 flex flex-wrap gap-2"><button onClick={startMicrophone} className="rounded-lg bg-cyan-400 px-4 py-2 text-xs font-bold text-slate-950"><Mic className="mr-1 inline size-3.5" /> Ativar microfone</button><label className="cursor-pointer rounded-lg border border-fuchsia-400/60 px-4 py-2 text-xs font-bold text-fuchsia-200">{fileName || "Importar áudio local"}<input className="sr-only" type="file" accept="audio/*" onChange={onFile} /></label>{fileUrl && <button onClick={startFile} className="rounded-lg border border-emerald-400/60 px-4 py-2 text-xs font-bold text-emerald-200">Analisar arquivo</button>}</div></section>{fileUrl && <audio ref={audioRef} src={fileUrl} onEnded={() => { setPlaying(false); setListening(false) }} className="hidden" />}</main>
+    <section className="mx-auto grid max-w-6xl gap-3 px-3 sm:px-6 lg:grid-cols-[1fr_290px]">
+      <div className="rounded-2xl border border-[#302552] bg-[#10101c] p-3 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-widest text-fuchsia-300">{mode === "song" ? "Nota alvo" : "Free play"}</p><div className="mt-1 flex items-end gap-3"><strong className="text-5xl text-white">{mode === "song" ? targetNote : detected || "—"}</strong>{mode === "song" && next && <span className="mb-2 text-sm text-cyan-300">Depois: {next.note}</span>}</div><p className="mt-2 text-sm text-slate-300">{message}</p></div><div className="flex gap-2"><button onClick={() => setMode("song")} className={`rounded-lg px-3 py-2 text-xs font-bold ${mode === "song" ? "bg-fuchsia-500" : "border border-white/10 text-slate-400"}`}>Música</button><button onClick={() => setMode("free")} className={`rounded-lg px-3 py-2 text-xs font-bold ${mode === "free" ? "bg-cyan-400 text-slate-950" : "border border-white/10 text-slate-400"}`}>Free play</button></div></div>
+        <div className="mt-5 flex items-center gap-3 border-t border-white/10 pt-3"><button onClick={() => setRunning((value) => !value)} className="grid size-11 place-items-center rounded-full bg-fuchsia-500" aria-label={running ? "Pausar" : "Iniciar"}>{running ? <Pause className="size-5" /> : <Play className="size-5" />}</button><button onClick={() => { setTargetIndex(0); setScore(0); setCombo(0); setLastAccepted(null); acceptedForTarget.current = false; setMessage("Treino reiniciado") }} className="grid size-11 place-items-center rounded-full border border-white/15" aria-label="Reiniciar"><RotateCcw className="size-4" /></button><span className="text-xs text-slate-400">{running ? "Treino em andamento" : "Pressione iniciar quando estiver pronto"}</span></div>
+      </div>
+      <aside className="rounded-2xl border border-cyan-400/25 bg-[#10101c] p-4"><p className="font-mono text-[10px] uppercase tracking-widest text-cyan-300">Próxima sugestão</p><strong className="mt-2 block text-3xl text-cyan-300">{mode === "free" ? suggestion : next?.note || "Fim"}</strong><p className="mt-1 text-sm text-slate-400">{mode === "free" ? `Campo harmônico de ${track.key}` : "Só avança quando você acertar"}</p><div className="mt-4 flex flex-wrap gap-2">{(harmonic[track.key] || harmonic.C).map((chord) => <span key={chord} className={`rounded-md px-2 py-1 text-xs ${chord.replace("m", "") === (mode === "free" ? detected : next?.note) ? "bg-cyan-400 text-slate-950" : "bg-white/5 text-slate-400"}`}>{chord}</span>)}</div></aside>
+    </section>
+    <section className="mx-auto mt-3 max-w-6xl px-3 pb-8 sm:px-6"><div className="overflow-x-auto rounded-2xl border border-[#302552] bg-[#0d0d18] p-3"><div className="mb-3 flex items-center justify-between"><span className="text-xs font-bold text-slate-300">Braço do violão · localize a nota</span><span className="text-xs text-slate-500">Atual: {detected || "—"} · Alvo: {mode === "song" ? targetNote : "livre"}</span></div><div className="min-w-[760px]">{strings.map((stringName, stringIndex) => <div key={stringName} className="flex h-10 items-center"><span className="w-7 font-mono text-xs text-cyan-300">{stringName}</span><div className="flex flex-1">{fretPositions.map((fret) => { const open = stringIndex === 0 ? "E" : stringIndex === 1 ? "B" : stringIndex === 2 ? "G" : stringIndex === 3 ? "D" : stringIndex === 4 ? "A" : "E"; const note = noteNames[(noteNames.indexOf(open) + fret) % 12]; const isCurrent = detected === note; const isTarget = mode === "song" && targetNote === note; return <div key={`${stringName}-${fret}`} className={`relative flex h-9 w-14 items-center justify-center border-r border-[#3a3550] text-xs ${fret === 0 ? "border-l-2 border-cyan-300/60" : ""}`}><span className={`relative z-10 grid size-6 place-items-center rounded-full ${isCurrent ? "bg-cyan-300 text-slate-950 shadow-[0_0_16px_#67e8f9]" : isTarget ? "border border-fuchsia-300 text-fuchsia-200" : "text-slate-500"}`}>{note}</span></div> })}</div></div>)}</div></div></section>
+    <div className="fixed bottom-3 left-3 right-3 z-20 flex items-center justify-between rounded-xl border border-cyan-300/40 bg-[#141322]/95 px-3 py-2 shadow-2xl backdrop-blur sm:hidden"><span className="flex items-center gap-2 text-xs"><span className={`size-2 rounded-full ${listening ? "bg-emerald-400" : "bg-slate-500"}`} />{listening ? `Ouvindo ${detected || "..."}` : "Microfone desligado"}</span><button onClick={listening ? stopMicrophone : startMicrophone} className="rounded-lg bg-cyan-400 px-3 py-2 text-xs font-bold text-slate-950">{listening ? "Parar" : "Ativar"}</button></div>
+  </main>
 }
