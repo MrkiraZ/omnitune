@@ -8,6 +8,7 @@ type DemoEvent = { label: string; kind: "note" | "chord"; degree: string; time: 
 type Track = { id: string; title: string; subtitle: string; bpm: number; key: string; events: DemoEvent[] }
 
 const tracks: Track[] = [
+  { id: "quinta", title: "5th Symphony", subtitle: "Abertura clássica · Beethoven", bpm: 108, key: "C", events: ["G", "G", "G", "E♭", "F", "F", "F", "D"].map((label, i) => ({ label, kind: "note", degree: ["V", "V", "V", "III", "IV", "IV", "IV", "II"][i], time: i * .72, duration: .5, color: i < 4 ? "red" : "yellow" })) },
   { id: "aranha", title: "Aranha 1-2-3-4", subtitle: "Exercício cromático · Iniciante", bpm: 60, key: "E", events: ["E", "F", "F#", "G", "G#", "A", "A#", "B", "C", "C#", "D", "D#"].map((label, i) => ({ label, kind: "note", degree: `${i + 1}`, time: i * 1.2, duration: .9, color: i % 2 ? "red" : "green" })) },
   { id: "alegria", title: "Ode à Alegria", subtitle: "Melodia clássica · Beethoven", bpm: 72, key: "C", events: ["E", "E", "F", "G", "G", "F", "E", "D", "C", "C", "D", "E", "E", "D", "D"].map((label, i) => ({ label, kind: "note", degree: ["III", "III", "IV", "V"][i % 4], time: i * .9, duration: .7, color: i % 3 === 0 ? "yellow" : "blue" })) },
   { id: "pop", title: "Loop Pop Essencial", subtitle: "Progressão de acordes · G maior", bpm: 84, key: "G", events: ["G", "D", "Em", "C", "G", "D", "Em", "C"].map((label, i) => ({ label, kind: "chord", degree: ["I", "V", "vi", "IV"][i % 4], time: i * 2.2, duration: 1.9, color: ["green", "blue", "purple", "yellow"][i % 4] })) },
