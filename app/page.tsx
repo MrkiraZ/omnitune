@@ -56,6 +56,12 @@ export default function Home() {
   const stableNote = useRef("")
   const stableCount = useRef(0)
   const acceptedForTarget = useRef(false)
+  const advanceTimer = useRef<number | null>(null)
+
+  const clearAdvanceTimer = useCallback(() => {
+    if (advanceTimer.current !== null) window.clearTimeout(advanceTimer.current)
+    advanceTimer.current = null
+  }, [])
 
   const current = track.events[targetIndex]
   const next = track.events[targetIndex + 1]
@@ -75,6 +81,7 @@ export default function Home() {
 
   const handleDetected = useCallback((note: string) => {
     setDetected(note)
+    if (!running) return
     if (mode === "free") {
       setMessage(`Você tocou ${note}. Próxima sugestão: ${suggestion}`)
       return
@@ -86,18 +93,20 @@ export default function Home() {
       setScore((value) => value + 100)
       setCombo((value) => value + 1)
       setMessage(`Acertou ${note}. Prepare ${next?.note || "fim da música"}`)
-      window.setTimeout(() => {
+      clearAdvanceTimer()
+      advanceTimer.current = window.setTimeout(() => {
         setTargetIndex((value) => Math.min(value + 1, track.events.length - 1))
         acceptedForTarget.current = false
         setLastAccepted(null)
         stableNote.current = ""
         stableCount.current = 0
+        advanceTimer.current = null
       }, 650)
     } else {
       setCombo(0)
       setMessage(`Você tocou ${note}. Ainda falta ${targetNote}`)
     }
-  }, [mode, next?.note, suggestion, targetNote, track.events.length])
+  }, [clearAdvanceTimer, mode, next?.note, running, suggestion, targetNote, track.events.length])
 
   const analyze = useCallback(() => {
     const currentAnalyser = analyser.current
@@ -140,10 +149,14 @@ export default function Home() {
   }
 
   const selectTrack = (item: Track) => {
-    setTrack(item); setTargetIndex(0); setDetected(null); setLastAccepted(null); setScore(0); setCombo(0); setRunning(false); acceptedForTarget.current = false; setMessage(`Faixa selecionada: ${item.title}`)
+    clearAdvanceTimer()
+    setTrack(item); setTargetIndex(0); setDetected(null); setLastAccepted(null); setScore(0); setCombo(0); setRunning(false); acceptedForTarget.current = false; stableNote.current = ""; stableCount.current = 0; setMessage(`Faixa selecionada: ${item.title}`)
   }
 
-  useEffect(() => () => stopMicrophone(), [stopMicrophone])
+  useEffect(() => () => {
+    clearAdvanceTimer()
+    stopMicrophone()
+  }, [clearAdvanceTimer, stopMicrophone])
   const fretPositions = useMemo(() => Array.from({ length: 13 }, (_, index) => index), [])
 
   return <main className="min-h-screen bg-[#090912] text-white">
@@ -152,8 +165,8 @@ export default function Home() {
       {libraryOpen && <div className="mt-3 grid gap-2 sm:grid-cols-3">{tracks.map((item) => <button key={item.id} onClick={() => { selectTrack(item); setLibraryOpen(false) }} className={`rounded-xl border p-3 text-left ${item.id === track.id ? "border-cyan-300 bg-cyan-400/10" : "border-[#302552] bg-[#12111e]"}`}><b className="block text-sm">{item.title}</b><span className="text-xs text-slate-400">{item.description} · {item.bpm} BPM</span></button>)}</div>}
     </section>
     <section className="mx-auto grid max-w-6xl gap-3 px-3 sm:px-6 lg:grid-cols-[1fr_290px]">
-      <div className="rounded-2xl border border-[#302552] bg-[#10101c] p-3 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-widest text-fuchsia-300">{mode === "song" ? "Nota alvo" : "Free play"}</p><div className="mt-1 flex items-end gap-3"><strong className="text-5xl text-white">{mode === "song" ? targetNote : detected || "—"}</strong>{mode === "song" && next && <span className="mb-2 text-sm text-cyan-300">Depois: {next.note}</span>}</div><p className="mt-2 text-sm text-slate-300">{message}</p></div><div className="flex gap-2"><button onClick={() => setMode("song")} className={`rounded-lg px-3 py-2 text-xs font-bold ${mode === "song" ? "bg-fuchsia-500" : "border border-white/10 text-slate-400"}`}>Música</button><button onClick={() => setMode("free")} className={`rounded-lg px-3 py-2 text-xs font-bold ${mode === "free" ? "bg-cyan-400 text-slate-950" : "border border-white/10 text-slate-400"}`}>Free play</button></div></div>
-        <div className="mt-5 flex items-center gap-3 border-t border-white/10 pt-3"><button onClick={() => setRunning((value) => !value)} className="grid size-11 place-items-center rounded-full bg-fuchsia-500" aria-label={running ? "Pausar" : "Iniciar"}>{running ? <Pause className="size-5" /> : <Play className="size-5" />}</button><button onClick={() => { setTargetIndex(0); setScore(0); setCombo(0); setLastAccepted(null); acceptedForTarget.current = false; setMessage("Treino reiniciado") }} className="grid size-11 place-items-center rounded-full border border-white/15" aria-label="Reiniciar"><RotateCcw className="size-4" /></button><span className="text-xs text-slate-400">{running ? "Treino em andamento" : "Pressione iniciar quando estiver pronto"}</span></div>
+      <div className="rounded-2xl border border-[#302552] bg-[#10101c] p-3 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-widest text-fuchsia-300">{mode === "song" ? "Nota alvo" : "Free play"}</p><div className="mt-1 flex items-end gap-3"><strong className="text-5xl text-white">{mode === "song" ? targetNote : detected || "—"}</strong>{mode === "song" && next && <span className="mb-2 text-sm text-cyan-300">Depois: {next.note}</span>}</div><p className="mt-2 text-sm text-slate-300">{message}</p></div><div className="flex gap-2"><button onClick={() => { clearAdvanceTimer(); acceptedForTarget.current = false; setMode("song"); setRunning(false); setMessage("Modo música pronto. Pressione iniciar") }} className={`rounded-lg px-3 py-2 text-xs font-bold ${mode === "song" ? "bg-fuchsia-500" : "border border-white/10 text-slate-400"}`}>Música</button><button onClick={() => { clearAdvanceTimer(); acceptedForTarget.current = false; setMode("free"); setRunning(false); setMessage("Modo livre pronto. Pressione iniciar") }} className={`rounded-lg px-3 py-2 text-xs font-bold ${mode === "free" ? "bg-cyan-400 text-slate-950" : "border border-white/10 text-slate-400"}`}>Free play</button></div></div>
+        <div className="mt-5 flex items-center gap-3 border-t border-white/10 pt-3"><button onClick={() => setRunning((value) => !value)} className="grid size-11 place-items-center rounded-full bg-fuchsia-500" aria-label={running ? "Pausar" : "Iniciar"}>{running ? <Pause className="size-5" /> : <Play className="size-5" />}</button><button onClick={() => { clearAdvanceTimer(); setTargetIndex(0); setScore(0); setCombo(0); setLastAccepted(null); acceptedForTarget.current = false; stableNote.current = ""; stableCount.current = 0; setRunning(false); setMessage("Treino reiniciado. Pressione iniciar para começar") }} className="grid size-11 place-items-center rounded-full border border-white/15" aria-label="Reiniciar"><RotateCcw className="size-4" /></button><span className="text-xs text-slate-400">{running ? "Treino em andamento" : "Pressione iniciar quando estiver pronto"}</span></div>
       </div>
       <aside className="rounded-2xl border border-cyan-400/25 bg-[#10101c] p-4"><p className="font-mono text-[10px] uppercase tracking-widest text-cyan-300">Próxima sugestão</p><strong className="mt-2 block text-3xl text-cyan-300">{mode === "free" ? suggestion : next?.note || "Fim"}</strong><p className="mt-1 text-sm text-slate-400">{mode === "free" ? `Campo harmônico de ${track.key}` : "Só avança quando você acertar"}</p><div className="mt-4 flex flex-wrap gap-2">{(harmonic[track.key] || harmonic.C).map((chord) => <span key={chord} className={`rounded-md px-2 py-1 text-xs ${chord.replace("m", "") === (mode === "free" ? detected : next?.note) ? "bg-cyan-400 text-slate-950" : "bg-white/5 text-slate-400"}`}>{chord}</span>)}</div></aside>
     </section>
